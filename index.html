@@ -9,8 +9,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Snacc">
 <meta name="theme-color" content="#16110d">
-<link rel="apple-touch-icon" href="icon-180.png">
-<link rel="icon" type="image/png" href="icon-180.png">
+<link rel="apple-touch-icon" href="icon-180.png?v=2">
+<link rel="icon" type="image/png" href="icon-180.png?v=2">
 <title>Snacc</title>
 <style>
   :root{
@@ -605,15 +605,25 @@ async function backupNow(silent){
   renderVer();
 }
 async function restoreNow(){
-  const cfg=LS.get('ct_gh',null);if(!cfg||!cfg.token){toast('Enter your details first');return;}
+  // Read straight from the form fields so restore works on a fresh install
+  // WITHOUT saving first (saving would back up empty data over your backup).
+  const oEl=document.getElementById('sOwner');
+  const cfg=oEl?{owner:oEl.value.trim(),repo:document.getElementById('sRepo').value.trim(),token:document.getElementById('sToken').value.trim()}:LS.get('ct_gh',null);
+  if(!cfg||!cfg.owner||!cfg.repo||!cfg.token){toast('Fill in user, repo, and token');return;}
   const url=`https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/snacc-backup.json`;
   try{
     const g=await fetch(url,{headers:{Authorization:'Bearer '+cfg.token,Accept:'application/vnd.github+json'}});
-    if(g.status!==200){toast('No backup found');return;}
+    if(g.status!==200){toast(g.status===404?'No backup found in that repo':'Restore failed ('+g.status+')');return;}
     const data=JSON.parse(b64d((await g.json()).content));
     if(data.goals)goals=data.goals;if(data.saved)saved=data.saved;if(data.logs)logs=data.logs;
     if(data.barcache){barcache=data.barcache;LS.set('ct_barcache',barcache);}
-    saveAll();normalizeGoals();closeModal();refresh();toast('Restored from backup');
+    saveAll();normalizeGoals();
+    // Save creds for future auto-backups, and mark this exact state as already-backed-up
+    // so the auto-backup on next open doesn't redundantly re-push.
+    LS.set('ct_gh',{owner:cfg.owner,repo:cfg.repo,token:cfg.token});
+    LS.set('ct_lastpayload',JSON.stringify({goals,saved,logs,barcache}));
+    LS.set('ct_lastbackup',Date.now());LS.set('ct_bkfail',0);
+    closeModal();refresh();toast('Restored ✓');
   }catch(e){toast('Restore failed');}
 }
 function openSettings(){
@@ -622,7 +632,7 @@ function openSettings(){
   document.getElementById('modal').innerHTML=`
     <div class="grab"></div>
     <h3>Cloud backup</h3>
-    <div class="msub">Auto-saves your data to a private GitHub repo each time you open the app. Token is stored only on this device, never in the app.</div>
+    <div class="msub">Auto-saves your data to a private GitHub repo each time you open the app — token stays on this device only. On a new phone: type these three and tap <b>Restore</b> (no need to Save first).</div>
     <div class="row"><label>GitHub user</label><input id="sOwner" type="text" value="${esc(cfg.owner||'')}" placeholder="jonpetruescu" style="text-align:left"></div>
     <div class="row"><label>Data repo</label><input id="sRepo" type="text" value="${esc(cfg.repo||'')}" placeholder="snacc-data" style="text-align:left"></div>
     <div class="row"><label>Token</label><input id="sToken" type="password" value="${esc(cfg.token||'')}" placeholder="github_pat_…" style="text-align:left"></div>
@@ -704,7 +714,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v2.1 · 2026-06-27';
+const APP_VERSION='v2.3 · 2026-06-27';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
