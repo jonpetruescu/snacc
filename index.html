@@ -581,10 +581,8 @@ function relTime(ts){const s=(Date.now()-ts)/1000;
   if(s<86400)return Math.floor(s/3600)+'h ago';return new Date(ts).toLocaleDateString();}
 function renderVer(){
   const cfg=LS.get('ct_gh',null);let s='Snacc '+APP_VERSION;
-  if(cfg&&cfg.token){
-    if(LS.get('ct_bkfail',0)) s+=' · ⚠ backup failed';
-    else{const lb=LS.get('ct_lastbackup',0);if(lb)s+=' · ☁ saved '+relTime(lb);}
-  }
+  // Status hidden on success; only warn if a backup actually fails.
+  if(cfg&&cfg.token&&LS.get('ct_bkfail',0)) s+=' · ⚠ backup failed';
   document.getElementById('ver').textContent=s;
 }
 async function backupNow(silent){
@@ -702,7 +700,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v1.9 · 2026-06-27';
+const APP_VERSION='v2.0 · 2026-06-27';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
