@@ -582,6 +582,17 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
 /* ===== Init ===== */
 const APP_VERSION='v1.2 · 2026-06-27';
 document.getElementById('ver').textContent='Snacc '+APP_VERSION;
+// Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
+(async function checkForUpdate(){
+  try{
+    const r=await fetch('version.json?cb='+Date.now(),{cache:'no-store'});
+    const d=await r.json();
+    if(d&&d.v&&d.v!==APP_VERSION){
+      const u=new URLSearchParams(location.search);
+      if(u.get('u')!==d.v){ location.replace(location.pathname+'?u='+encodeURIComponent(d.v)); }
+    }
+  }catch(e){}
+})();
 normalizeGoals();
 refresh();
 enableDrag('addSheet',closeAdd);
