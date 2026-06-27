@@ -352,24 +352,33 @@ async function fetchJSON(url, ms=8000){
 }
 
 /* ---- Search (merge both sources) ---- */
+let searchSeq=0;
 async function doSearch(){
   const q=document.getElementById('searchInput').value.trim();
   const box=document.getElementById('searchResults');
   if(!q){ box.innerHTML=''; return; }
+  const mySeq=++searchSeq;                 // ignore stale responses if user searches again
   box.innerHTML='<div class="loading"><span class="spinner"></span></div>';
-  const [off,usda]=await Promise.allSettled([offSearch(q), usdaSearch(q)]);
-  let foods=[];
-  if(off.status==='fulfilled') foods=foods.concat(off.value);
-  if(usda.status==='fulfilled') foods=foods.concat(usda.value);
-  if(off.status==='rejected' && usda.status==='rejected'){
-    box.innerHTML='<div class="empty">Couldn’t reach the food database.<br>Check your connection.</div>'; return;
-  }
-  const seen=new Set();
-  foods=foods.filter(f=>{ const k=(f.name+'|'+f.brand).toLowerCase().trim();
-    if(seen.has(k)) return false; seen.add(k); return true; });
-  if(!foods.length){ box.innerHTML='<div class="empty">No matches found.<br>Try a different name.</div>'; return; }
-  box.innerHTML=foods.map((f,i)=>foodCard(f,i,'search')).join('');
-  window._searchFoods=foods;
+  const seen=new Set(); const acc=[]; let done=0, failed=0;
+  // USDA first (fast, better for whole foods), then Open Food Facts for branded extras
+  const sources=[usdaSearch(q), offSearch(q)];
+  const N=sources.length;
+  sources.forEach(p=>{
+    p.then(list=>{
+      if(mySeq!==searchSeq) return;
+      (list||[]).forEach(f=>{ const k=(f.name+'|'+f.brand).toLowerCase().trim();
+        if(!seen.has(k)){ seen.add(k); acc.push(f); } });
+      window._searchFoods=acc;
+      if(acc.length) box.innerHTML=acc.map((f,i)=>foodCard(f,i,'search')).join('');
+    }).catch(()=>{ failed++; })
+      .finally(()=>{ done++;
+        if(mySeq===searchSeq && done===N && !acc.length){
+          box.innerHTML = failed===N
+            ? '<div class="empty">Couldn’t reach the food database.<br>Check your connection.</div>'
+            : '<div class="empty">No matches found.<br>Try a different name.</div>';
+        }
+      });
+  });
 }
 async function offSearch(q){
   const url='https://world.openfoodfacts.org/cgi/search.pl?search_terms='+
