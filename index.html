@@ -529,8 +529,9 @@ async function usdaSearch(q){if(!usdaOn())return[];
   const url='https://api.nal.usda.gov/fdc/v1/foods/search?api_key='+USDA_KEY+'&query='+encodeURIComponent(q)+
     '&pageSize=20&dataType=Branded,Foundation,SR%20Legacy,Survey%20(FNDDS)';
   const data=await fetchJSON(url);return (data.foods||[]).map(parseUsda).filter(Boolean);}
-async function lookupBarcode(code){toast('Looking up '+code+'…');
-  let f=await offBarcode(code);if(!f&&usdaOn())f=await usdaBarcode(code);
+async function lookupBarcode(code){toast('Looking up…');
+  const [o,u]=await Promise.allSettled([offBarcode(code),usdaOn()?usdaBarcode(code):Promise.resolve(null)]);
+  const f=(o.status==='fulfilled'&&o.value)||(u.status==='fulfilled'&&u.value)||null;
   if(!f){toast('Product not found in either database');return;}openPortion(f);}
 async function offBarcode(code){try{
   const url='https://world.openfoodfacts.org/api/v2/product/'+encodeURIComponent(code)+
@@ -562,9 +563,10 @@ let qr=null,lastScan=0;
 function openScanner(){
   showSheet('scanScrim','scanModal');
   qr=new Html5Qrcode('reader');
-  const cfg={fps:10,qrbox:{width:250,height:160},formatsToSupport:[
-    Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.EAN_8,
-    Html5QrcodeSupportedFormats.UPC_A,Html5QrcodeSupportedFormats.UPC_E,Html5QrcodeSupportedFormats.CODE_128]};
+  const cfg={fps:15,qrbox:{width:280,height:170},disableFlip:true,
+    experimentalFeatures:{useBarCodeDetectorIfSupported:true},
+    formatsToSupport:[Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.EAN_8,
+      Html5QrcodeSupportedFormats.UPC_A,Html5QrcodeSupportedFormats.UPC_E]};
   qr.start({facingMode:'environment'},cfg,onScan,()=>{}).catch(()=>{toast('Camera unavailable. Allow camera access.');closeScanner();});
 }
 function onScan(text){const now=Date.now();if(now-lastScan<2500)return;lastScan=now;
@@ -578,7 +580,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v1.5 · 2026-06-27';
+const APP_VERSION='v1.6 · 2026-06-27';
 document.getElementById('ver').textContent='Snacc '+APP_VERSION;
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
