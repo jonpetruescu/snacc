@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-store">
+<meta http-equiv="Pragma" content="no-cache">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -341,6 +343,13 @@ function switchTab(name){
    foods and US branded UPCs. Leave key blank to disable USDA cleanly.       */
 const USDA_KEY = 'atacxlsNjojlOrTwquGwRvyOcrhRk1MtqLKwvfRa';
 function usdaOn(){ return USDA_KEY && USDA_KEY!=='REPLACE_WITH_USDA_KEY'; }
+/* fetch JSON with a timeout so one slow/down source can't hang the whole search */
+async function fetchJSON(url, ms=8000){
+  const ctrl=new AbortController();
+  const t=setTimeout(()=>ctrl.abort(), ms);
+  try{ const r=await fetch(url,{signal:ctrl.signal}); return await r.json(); }
+  finally{ clearTimeout(t); }
+}
 
 /* ---- Search (merge both sources) ---- */
 async function doSearch(){
@@ -366,7 +375,7 @@ async function offSearch(q){
   const url='https://world.openfoodfacts.org/cgi/search.pl?search_terms='+
     encodeURIComponent(q)+'&search_simple=1&action=process&json=1&page_size=20'+
     '&fields=product_name,brands,nutriments,serving_quantity,serving_size,code';
-  const res=await fetch(url); const data=await res.json();
+  const data=await fetchJSON(url);
   return (data.products||[]).map(parseProduct).filter(Boolean);
 }
 async function usdaSearch(q){
@@ -374,7 +383,7 @@ async function usdaSearch(q){
   const url='https://api.nal.usda.gov/fdc/v1/foods/search?api_key='+USDA_KEY+
     '&query='+encodeURIComponent(q)+'&pageSize=20'+
     '&dataType=Branded,Foundation,SR%20Legacy,Survey%20(FNDDS)';
-  const res=await fetch(url); const data=await res.json();
+  const data=await fetchJSON(url);
   return (data.foods||[]).map(parseUsda).filter(Boolean);
 }
 
@@ -390,7 +399,7 @@ async function offBarcode(code){
   try{
     const url='https://world.openfoodfacts.org/api/v2/product/'+encodeURIComponent(code)+
       '.json?fields=product_name,brands,nutriments,serving_quantity,serving_size,code';
-    const res=await fetch(url); const data=await res.json();
+    const data=await fetchJSON(url);
     if(data.status!==1 || !data.product) return null;
     return parseProduct(data.product);
   }catch(e){ return null; }
@@ -399,7 +408,7 @@ async function usdaBarcode(code){
   try{
     const url='https://api.nal.usda.gov/fdc/v1/foods/search?api_key='+USDA_KEY+
       '&query='+encodeURIComponent(code)+'&dataType=Branded&pageSize=5';
-    const res=await fetch(url); const data=await res.json();
+    const data=await fetchJSON(url);
     const strip=s=>String(s||'').replace(/^0+/,'');
     const hit=(data.foods||[]).find(x=>strip(x.gtinUpc)===strip(code)) || (data.foods||[])[0];
     return hit ? parseUsda(hit) : null;
