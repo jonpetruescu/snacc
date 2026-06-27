@@ -193,6 +193,7 @@
       <button class="btn" onclick="doSearch()">Go</button>
     </div>
     <p class="scan-hint">Type a food, or tap ▣ to scan a barcode</p>
+    <button class="btn btn-wide" style="background:var(--card2);color:var(--text);margin-bottom:8px" onclick="openCustomForm()">＋ Add a custom food</button>
     <div id="searchResults"></div>
   </section>
 
@@ -241,6 +242,12 @@ let saved = LS.get('ct_saved', []);          // array of food objects
 let logs  = LS.get('ct_logs', {});           // { 'YYYY-MM-DD': [entries] }
 let curDate = todayKey();
 let pendingFood = null;                       // food being added in modal
+
+// Bundled offline database — searched instantly, no network needed.
+let LOCAL_FOODS = [];
+fetch('foods.json').then(r=>r.json()).then(d=>{
+  LOCAL_FOODS = d.map(x=>({name:x.n, brand:'', cal:x.cal, p:x.p, c:x.c, f:x.f, servingG:x.g||null}));
+}).catch(()=>{});
 
 function todayKey(){ const d=new Date(); return d.toISOString().slice(0,10); }
 function saveAll(){ LS.set('ct_goals',goals); LS.set('ct_saved',saved); LS.set('ct_logs',logs); }
@@ -353,32 +360,43 @@ async function fetchJSON(url, ms=8000){
 
 /* ---- Search (merge both sources) ---- */
 let searchSeq=0;
+function fkey(f){ return (f.name+'|'+(f.brand||'')).toLowerCase().trim(); }
+// Instant search over the bundled database + your saved/custom foods.
+function localSearch(q){
+  const t=q.toLowerCase();
+  const pool=saved.concat(LOCAL_FOODS);
+  const hits=pool.filter(f=>f.name.toLowerCase().includes(t));
+  hits.sort((a,b)=>{
+    const aw=a.name.toLowerCase().startsWith(t)?0:1, bw=b.name.toLowerCase().startsWith(t)?0:1;
+    return aw-bw || a.name.length-b.name.length;
+  });
+  return hits.slice(0,40);
+}
 async function doSearch(){
   const q=document.getElementById('searchInput').value.trim();
   const box=document.getElementById('searchResults');
   if(!q){ box.innerHTML=''; return; }
   const mySeq=++searchSeq;                 // ignore stale responses if user searches again
-  box.innerHTML='<div class="loading"><span class="spinner"></span></div>';
-  const seen=new Set(); const acc=[]; let done=0, failed=0;
-  // USDA first (fast, better for whole foods), then Open Food Facts for branded extras
-  const sources=[usdaSearch(q), offSearch(q)];
-  const N=sources.length;
-  sources.forEach(p=>{
-    p.then(list=>{
-      if(mySeq!==searchSeq) return;
-      (list||[]).forEach(f=>{ const k=(f.name+'|'+f.brand).toLowerCase().trim();
-        if(!seen.has(k)){ seen.add(k); acc.push(f); } });
-      window._searchFoods=acc;
-      if(acc.length) box.innerHTML=acc.map((f,i)=>foodCard(f,i,'search')).join('');
-    }).catch(()=>{ failed++; })
-      .finally(()=>{ done++;
-        if(mySeq===searchSeq && done===N && !acc.length){
-          box.innerHTML = failed===N
-            ? '<div class="empty">Couldn’t reach the food database.<br>Check your connection.</div>'
-            : '<div class="empty">No matches found.<br>Try a different name.</div>';
-        }
-      });
-  });
+  const seen=new Set(); const acc=[];
+  function render(pending){
+    let html=acc.map((f,i)=>foodCard(f,i,'search')).join('');
+    if(pending) html+='<div class="loading"><span class="spinner"></span> searching more…</div>';
+    box.innerHTML=html;
+  }
+  function addList(list){
+    (list||[]).forEach(f=>{ const k=fkey(f); if(!seen.has(k)){ seen.add(k); acc.push(f); } });
+    window._searchFoods=acc;
+  }
+  // 1. Instant local results (offline DB + your saved/custom foods)
+  addList(localSearch(q));
+  if(acc.length) render(true); else box.innerHTML='<div class="loading"><span class="spinner"></span></div>';
+  // 2. USDA online supplement (reliable; appended when it arrives)
+  usdaSearch(q).then(list=>{ if(mySeq!==searchSeq) return; addList(list); })
+    .catch(()=>{})
+    .finally(()=>{ if(mySeq!==searchSeq) return;
+      if(acc.length){ render(false); }
+      else { box.innerHTML='<div class="empty">No matches found.<br>Tap “＋ Add a custom food” above to enter it yourself.</div>'; }
+    });
 }
 async function offSearch(q){
   const url='https://world.openfoodfacts.org/cgi/search.pl?search_terms='+
@@ -596,6 +614,48 @@ function saveGoals(){
     c:+document.getElementById('gC').value||0,
     f:+document.getElementById('gF').value||0 };
   saveAll(); closeModal(); renderDashboard(); toast('Goals updated');
+}
+
+/* ============ Custom food ============ */
+function openCustomForm(){
+  const prefill=(document.getElementById('searchInput')&&document.getElementById('searchInput').value||'').trim();
+  pendingFood=null;
+  document.getElementById('modalContent').innerHTML=`
+    <h3>Add a custom food</h3>
+    <div class="msub">Enter the nutrition for one serving. It saves to your phone and becomes searchable.</div>
+    <div class="portion-row"><label style="width:78px">Name</label>
+      <input id="cfName" type="text" value="${esc(prefill)}" placeholder="e.g. Mom's chili" style="flex:1;text-align:left"></div>
+    <div class="portion-row"><label style="width:78px">Serving g</label>
+      <input id="cfServ" type="number" inputmode="decimal" value="100"></div>
+    <div class="portion-row"><label style="width:78px">Calories</label>
+      <input id="cfCal" type="number" inputmode="decimal" placeholder="per serving"></div>
+    <div class="portion-row"><label style="width:78px">Protein g</label>
+      <input id="cfP" type="number" inputmode="decimal" placeholder="per serving"></div>
+    <div class="portion-row"><label style="width:78px">Carbs g</label>
+      <input id="cfC" type="number" inputmode="decimal" placeholder="per serving"></div>
+    <div class="portion-row"><label style="width:78px">Fat g</label>
+      <input id="cfF" type="number" inputmode="decimal" placeholder="per serving"></div>
+    <div class="modal-actions">
+      <button class="cancel" onclick="closeModal()">Cancel</button>
+      <button class="save" onclick="saveCustomFood()">Save</button>
+    </div>`;
+  document.getElementById('modalBg').classList.add('show');
+}
+function saveCustomFood(){
+  const name=document.getElementById('cfName').value.trim();
+  const serv=parseFloat(document.getElementById('cfServ').value)||100;
+  const cal=parseFloat(document.getElementById('cfCal').value)||0;
+  const p=parseFloat(document.getElementById('cfP').value)||0;
+  const c=parseFloat(document.getElementById('cfC').value)||0;
+  const f=parseFloat(document.getElementById('cfF').value)||0;
+  if(!name){ toast('Enter a name'); return; }
+  if(cal<=0){ toast('Enter calories'); return; }
+  const r=100/serv;   // store per-100g to match the app's food model
+  const food={ name, brand:'', cal:Math.round(cal*r), p:+(p*r).toFixed(1),
+    c:+(c*r).toFixed(1), f:+(f*r).toFixed(1), servingG:Math.round(serv) };
+  saved.unshift(food); saveAll();
+  closeModal(); toast('Custom food saved');
+  openAddModal({...food});   // open portion modal so they can log it now
 }
 
 /* ============ Scanner ============ */
