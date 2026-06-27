@@ -580,7 +580,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v1.2 · 2026-06-27';
+const APP_VERSION='v1.3 · 2026-06-27';
 document.getElementById('ver').textContent='Snacc '+APP_VERSION;
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
