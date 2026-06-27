@@ -237,7 +237,7 @@
 /* ===== Storage ===== */
 const LS={ get(k,d){try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},
   set(k,v){localStorage.setItem(k,JSON.stringify(v))} };
-let goals=LS.get('ct_goals',{cal:2000,p:150,c:200,f:65});
+let goals=LS.get('ct_goals',{cal:2000,pPct:40,cPct:30,fPct:30,p:200,c:150,f:67});
 let saved=LS.get('ct_saved',[]);
 let logs =LS.get('ct_logs',{});
 let curDate=todayKey();
@@ -580,7 +580,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v1.3 · 2026-06-27';
+const APP_VERSION='v1.4 · 2026-06-27';
 document.getElementById('ver').textContent='Snacc '+APP_VERSION;
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
