@@ -194,7 +194,7 @@
 </header>
 
 <main id="diary"></main>
-<div class="ver" id="ver"></div>
+<div class="ver" id="ver" onclick="openSettings()"></div>
 
 <!-- Add sheet -->
 <div class="scrim" id="addScrim" onclick="closeAdd()"></div>
@@ -207,7 +207,8 @@
       <button class="sq-btn scan" onclick="openScanner()" title="Scan barcode">▣</button>
     </div>
     <div class="add-actions">
-      <button onclick="openCustomForm()">＋ Custom food</button>
+      <button onclick="openCustomForm()">＋ Custom</button>
+      <button onclick="openQuickAdd()">⚡ Quick cals</button>
       <button onclick="changeAddMeal()">🍽 <span id="addMealBtn">Snacks</span></button>
     </div>
   </div>
@@ -239,7 +240,8 @@ let goals=LS.get('ct_goals',{cal:2000,pPct:40,cPct:30,fPct:30,p:200,c:150,f:67})
 let saved=LS.get('ct_saved',[]);
 let logs =LS.get('ct_logs',{});
 let curDate=todayKey();
-let pendingFood=null, selectedMeal='Snacks', addMeal='Snacks';
+let pendingFood=null, selectedMeal='Snacks', addMeal='Snacks', editingId=null;
+let barcache=LS.get('ct_barcache',{});
 const MEALS=['Breakfast','Lunch','Dinner','Snacks'];
 const MICON={Breakfast:'🍳',Lunch:'🥗',Dinner:'🍝',Snacks:'🍎'};
 const reg={results:[],quick:[]};
@@ -299,9 +301,9 @@ function renderDiary(){
       <button class="madd" onclick="openAdd('${meal}')">+</button></div>`;
     if(es.length){
       html+='<div class="entries">'+es.map(e=>`
-        <div class="entry"><div class="info">
+        <div class="entry"><div class="info" onclick="openEditEntry('${e.id}')">
           <div class="en">${esc(e.name)}</div>
-          <div class="es">${e.amount} g · ${e.p}p ${e.c}c ${e.f}f</div></div>
+          <div class="es">${e.quick?'':e.amount+' g · '}${e.p}p ${e.c}c ${e.f}f</div></div>
           <div class="ec">${e.cal}<small>kcal</small></div>
           <button class="del" onclick="removeEntry('${e.id}')">✕</button></div>`).join('')+'</div>';
     } else {
@@ -340,13 +342,22 @@ function recentFoods(){
   });
   return out.slice(0,15);
 }
+function freqFoods(){
+  const count={},sample={};
+  Object.values(logs).forEach(es=>(es||[]).forEach(e=>{
+    if(e.quick)return;const k=(e.name+'|'+(e.brand||'')).toLowerCase();
+    count[k]=(count[k]||0)+1;
+    if(!sample[k]){const b=entryBase(e);sample[k]={name:e.name,brand:e.brand||'',cal:b.cal,p:b.p,c:b.c,f:b.f,servingG:b.g};}
+  }));
+  return Object.keys(count).sort((a,b)=>count[b]-count[a]).map(k=>sample[k]);
+}
 function renderQuick(){
   const seen=new Set(),list=[];
-  saved.concat(recentFoods()).forEach(f=>{const k=fkey(f);if(!seen.has(k)){seen.add(k);list.push(f);}});
-  reg.quick=list;
+  saved.concat(freqFoods()).forEach(f=>{const k=fkey(f);if(!seen.has(k)){seen.add(k);list.push(f);}});
+  reg.quick=list.slice(0,25);
   const box=document.getElementById('addResults');
-  box.innerHTML=list.length
-    ? '<div class="sec-label">Saved & recent</div>'+list.map((f,i)=>fcard(f,i,'quick')).join('')
+  box.innerHTML=reg.quick.length
+    ? '<div class="sec-label">Saved & frequent</div>'+reg.quick.map((f,i)=>fcard(f,i,'quick')).join('')
     : '<div class="empty">Search a food, scan a barcode,<br>or add a custom food.</div>';
 }
 function fcard(f,i,which){const m=calcMacros(f,100);
@@ -386,10 +397,12 @@ function runSearch(q){
 }
 
 /* ===== Portion modal ===== */
-function openPortion(food){
-  pendingFood=food; selectedMeal=addMeal;
-  const hasServ=!!food.servingG;
-  const amt=hasServ?1:100;
+function openPortion(food,editId,ex){
+  pendingFood=food; editingId=editId||null;
+  selectedMeal=ex?ex.meal:addMeal;
+  const editing=!!editId, hasServ=!!food.servingG;
+  let unit,amt;
+  if(editing){unit='g';amt=ex.amount;} else if(hasServ){unit='serv';amt=1;} else {unit='g';amt=100;}
   const isSaved=saved.some(s=>fkey(s)===fkey(food));
   document.getElementById('modal').innerHTML=`
     <div class="grab"></div>
@@ -403,14 +416,14 @@ function openPortion(food){
     <div class="row">
       <input class="amt" id="amtInput" type="number" inputmode="decimal" value="${amt}" min="1" oninput="updMacros()">
       <select id="unitSel" onchange="onUnit()">
-        ${hasServ?`<option value="serv">serving (${food.servingG} g)</option>`:''}
-        <option value="g">grams</option>
+        ${hasServ?`<option value="serv" ${unit==='serv'?'selected':''}>serving (${food.servingG} g)</option>`:''}
+        <option value="g" ${unit==='g'?'selected':''}>grams</option>
       </select></div>
     <div class="seg" id="mealSeg">${MEALS.map(m=>`<button class="${m===selectedMeal?'on':''}" onclick="setMeal('${m}')">${m}</button>`).join('')}</div>
     <div class="m-actions">
       <button class="star ${isSaved?'on':''}" id="starBtn" onclick="toggleSave()">★</button>
       <button class="cancel" onclick="closeModal()">Cancel</button>
-      <button class="save" onclick="confirmAdd()">Add</button></div>`;
+      <button class="save" onclick="confirmAdd()">${editing?'Save':'Add'}</button></div>`;
   updMacros();
   showSheet('modalScrim','modal');
 }
@@ -424,9 +437,14 @@ function setMeal(m){selectedMeal=m;[...document.querySelectorAll('#mealSeg butto
 function confirmAdd(){
   const g=curGrams();if(g<=0){toast('Enter an amount');return;}
   const m=calcMacros(pendingFood,g);
+  const b={cal:pendingFood.cal,p:pendingFood.p,c:pendingFood.c,f:pendingFood.f,g:pendingFood.servingG||100};
+  if(editingId){
+    const e=(logs[curDate]||[]).find(x=>x.id===editingId);
+    if(e){e.meal=selectedMeal;e.amount=Math.round(g);e.cal=m.cal;e.p=m.p;e.c=m.c;e.f=m.f;e.b=b;delete e.quick;}
+    saveAll();closeModal();refresh();toast('Updated');return;
+  }
   const entry={id:Date.now()+''+Math.random().toString(36).slice(2,6),name:pendingFood.name,brand:pendingFood.brand||'',
-    meal:selectedMeal,amount:Math.round(g),cal:m.cal,p:m.p,c:m.c,f:m.f,
-    b:{cal:pendingFood.cal,p:pendingFood.p,c:pendingFood.c,f:pendingFood.f,g:pendingFood.servingG||100}};
+    meal:selectedMeal,amount:Math.round(g),cal:m.cal,p:m.p,c:m.c,f:m.f,b};
   (logs[curDate]=logs[curDate]||[]).push(entry);saveAll();
   closeModal();closeAdd();refresh();toast('Added to '+selectedMeal);
 }
@@ -434,7 +452,42 @@ function toggleSave(){const f=pendingFood,i=saved.findIndex(s=>fkey(s)===fkey(f)
   if(i>=0){saved.splice(i,1);btn.classList.remove('on');toast('Unsaved');}
   else{saved.unshift({name:f.name,brand:f.brand||'',cal:f.cal,p:f.p,c:f.c,f:f.f,servingG:f.servingG||null});btn.classList.add('on');toast('Saved');}
   saveAll();}
-function closeModal(){hideSheet('modalScrim','modal');pendingFood=null;}
+function closeModal(){hideSheet('modalScrim','modal');pendingFood=null;editingId=null;}
+function openEditEntry(id){
+  const e=(logs[curDate]||[]).find(x=>x.id===id);if(!e)return;
+  if(e.quick){openQuickAdd(e);return;}
+  const b=entryBase(e);
+  openPortion({name:e.name,brand:e.brand||'',cal:b.cal,p:b.p,c:b.c,f:b.f,servingG:b.g},e.id,e);
+}
+function openQuickAdd(ex){
+  editingId=ex?ex.id:null; selectedMeal=ex?ex.meal:addMeal;
+  document.getElementById('modal').innerHTML=`
+    <div class="grab"></div>
+    <h3>Quick add</h3><div class="msub">Log calories directly — macros optional.</div>
+    <div class="row"><label>Name</label><input id="qName" type="text" value="${ex?esc(ex.name):''}" placeholder="Quick add" style="text-align:left"></div>
+    <div class="row"><label>Calories</label><input id="qCal" type="number" inputmode="decimal" value="${ex?ex.cal:''}" placeholder="kcal"></div>
+    <div class="row"><label>Protein g</label><input id="qP" type="number" inputmode="decimal" value="${ex&&ex.p?ex.p:''}" placeholder="optional"></div>
+    <div class="row"><label>Carbs g</label><input id="qC" type="number" inputmode="decimal" value="${ex&&ex.c?ex.c:''}" placeholder="optional"></div>
+    <div class="row"><label>Fat g</label><input id="qF" type="number" inputmode="decimal" value="${ex&&ex.f?ex.f:''}" placeholder="optional"></div>
+    <div class="seg" id="mealSeg">${MEALS.map(m=>`<button class="${m===selectedMeal?'on':''}" onclick="setMeal('${m}')">${m}</button>`).join('')}</div>
+    <div class="m-actions"><button class="cancel" onclick="closeModal()">Cancel</button>
+      <button class="save" onclick="saveQuick()">${ex?'Save':'Add'}</button></div>`;
+  showSheet('modalScrim','modal');
+}
+function saveQuick(){
+  const cal=parseFloat(document.getElementById('qCal').value)||0;
+  if(cal<=0){toast('Enter calories');return;}
+  const name=document.getElementById('qName').value.trim()||'Quick add';
+  const p=parseFloat(document.getElementById('qP').value)||0,c=parseFloat(document.getElementById('qC').value)||0,f=parseFloat(document.getElementById('qF').value)||0;
+  if(editingId){
+    const e=(logs[curDate]||[]).find(x=>x.id===editingId);
+    if(e){e.name=name;e.meal=selectedMeal;e.quick=true;e.cal=Math.round(cal);e.p=+p.toFixed(1);e.c=+c.toFixed(1);e.f=+f.toFixed(1);}
+    saveAll();closeModal();refresh();toast('Updated');return;
+  }
+  const entry={id:Date.now()+''+Math.random().toString(36).slice(2,6),name,brand:'',meal:selectedMeal,quick:true,
+    amount:0,cal:Math.round(cal),p:+p.toFixed(1),c:+c.toFixed(1),f:+f.toFixed(1)};
+  (logs[curDate]=logs[curDate]||[]).push(entry);saveAll();closeModal();closeAdd();refresh();toast('Added to '+selectedMeal);
+}
 
 /* ===== Custom food ===== */
 function openCustomForm(){
@@ -520,6 +573,56 @@ function enableDrag(sheetId,closeFn){
     const shouldClose=dy>90;sheet.style.transform='';if(shouldClose)closeFn();});
 }
 
+/* ===== Cloud backup (GitHub, optional) ===== */
+function b64e(s){return btoa(unescape(encodeURIComponent(s)));}
+function b64d(s){return decodeURIComponent(escape(atob(s)));}
+async function backupNow(silent){
+  const cfg=LS.get('ct_gh',null);if(!cfg||!cfg.token||!cfg.owner||!cfg.repo)return;
+  const data=JSON.stringify({goals,saved,logs,barcache});
+  if(silent&&data===LS.get('ct_lastpayload',''))return;        // nothing changed → skip
+  const url=`https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/snacc-backup.json`;
+  const headers={Authorization:'Bearer '+cfg.token,Accept:'application/vnd.github+json'};
+  try{
+    let sha;const g=await fetch(url,{headers});if(g.status===200)sha=(await g.json()).sha;
+    const body={message:'Snacc backup '+new Date().toISOString(),content:b64e(data)};if(sha)body.sha=sha;
+    const p=await fetch(url,{method:'PUT',headers,body:JSON.stringify(body)});
+    if(p.ok){LS.set('ct_lastbackup',Date.now());LS.set('ct_lastpayload',data);if(!silent)toast('Backed up ✓');}
+    else if(!silent)toast('Backup failed ('+p.status+')');
+  }catch(e){if(!silent)toast('Backup failed — check connection');}
+}
+async function restoreNow(){
+  const cfg=LS.get('ct_gh',null);if(!cfg||!cfg.token){toast('Enter your details first');return;}
+  const url=`https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/snacc-backup.json`;
+  try{
+    const g=await fetch(url,{headers:{Authorization:'Bearer '+cfg.token,Accept:'application/vnd.github+json'}});
+    if(g.status!==200){toast('No backup found');return;}
+    const data=JSON.parse(b64d((await g.json()).content));
+    if(data.goals)goals=data.goals;if(data.saved)saved=data.saved;if(data.logs)logs=data.logs;
+    if(data.barcache){barcache=data.barcache;LS.set('ct_barcache',barcache);}
+    saveAll();normalizeGoals();closeModal();refresh();toast('Restored from backup');
+  }catch(e){toast('Restore failed');}
+}
+function openSettings(){
+  const cfg=LS.get('ct_gh',{owner:'',repo:'snacc-data',token:''});
+  const last=LS.get('ct_lastbackup',0);
+  document.getElementById('modal').innerHTML=`
+    <div class="grab"></div>
+    <h3>Cloud backup</h3>
+    <div class="msub">Auto-saves your data to a private GitHub repo each time you open the app. Token is stored only on this device, never in the app.</div>
+    <div class="row"><label>GitHub user</label><input id="sOwner" type="text" value="${esc(cfg.owner||'')}" placeholder="jonpetruescu" style="text-align:left"></div>
+    <div class="row"><label>Data repo</label><input id="sRepo" type="text" value="${esc(cfg.repo||'')}" placeholder="snacc-data" style="text-align:left"></div>
+    <div class="row"><label>Token</label><input id="sToken" type="password" value="${esc(cfg.token||'')}" placeholder="github_pat_…" style="text-align:left"></div>
+    <div class="gtot">${last?'Last backup: '+new Date(last).toLocaleString():'No backup yet'}</div>
+    <div class="m-actions"><button class="cancel" onclick="restoreNow()">Restore</button>
+      <button class="save" onclick="saveSettings()">Save &amp; back up</button></div>
+    <div style="text-align:center;margin-top:12px"><button class="goal-edit" onclick="closeModal()">Close</button></div>`;
+  showSheet('modalScrim','modal');
+}
+function saveSettings(){
+  const cfg={owner:document.getElementById('sOwner').value.trim(),repo:document.getElementById('sRepo').value.trim(),token:document.getElementById('sToken').value.trim()};
+  LS.set('ct_gh',cfg);LS.set('ct_lastpayload','');toast('Saved');backupNow(false);
+}
+
 /* ===== Food databases (barcode + USDA) ===== */
 const USDA_KEY='atacxlsNjojlOrTwquGwRvyOcrhRk1MtqLKwvfRa';
 function usdaOn(){return USDA_KEY&&USDA_KEY!=='REPLACE_WITH_USDA_KEY';}
@@ -529,10 +632,13 @@ async function usdaSearch(q){if(!usdaOn())return[];
   const url='https://api.nal.usda.gov/fdc/v1/foods/search?api_key='+USDA_KEY+'&query='+encodeURIComponent(q)+
     '&pageSize=20&dataType=Branded,Foundation,SR%20Legacy,Survey%20(FNDDS)';
   const data=await fetchJSON(url);return (data.foods||[]).map(parseUsda).filter(Boolean);}
-async function lookupBarcode(code){toast('Looking up…');
+async function lookupBarcode(code){
+  if(barcache[code]){openPortion({...barcache[code]});return;}   // instant repeat scans
+  toast('Looking up…');
   const [o,u]=await Promise.allSettled([offBarcode(code),usdaOn()?usdaBarcode(code):Promise.resolve(null)]);
   const f=(o.status==='fulfilled'&&o.value)||(u.status==='fulfilled'&&u.value)||null;
-  if(!f){toast('Product not found in either database');return;}openPortion(f);}
+  if(!f){toast('Product not found in either database');return;}
+  barcache[code]=f;LS.set('ct_barcache',barcache);openPortion(f);}
 async function offBarcode(code){try{
   const url='https://world.openfoodfacts.org/api/v2/product/'+encodeURIComponent(code)+
     '.json?fields=product_name,brands,nutriments,serving_quantity,serving_size,code';
@@ -580,7 +686,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v1.6 · 2026-06-27';
+const APP_VERSION='v1.7 · 2026-06-27';
 document.getElementById('ver').textContent='Snacc '+APP_VERSION;
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
@@ -600,6 +706,7 @@ enableDrag('modal',closeModal);
 enableDrag('scanModal',closeScanner);
 // Auto-update: service worker checks the network for a fresh version each launch.
 if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));}
+backupNow(true);  // auto-backup on open if cloud sync is set up
 </script>
 </body>
 </html>
