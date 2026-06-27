@@ -335,40 +335,96 @@ function switchTab(name){
   if(name==='search') setTimeout(()=>document.getElementById('searchInput').focus(),100);
 }
 
-/* ============ Open Food Facts: search ============ */
+/* ============ Food databases ============
+   Primary: Open Food Facts (free, no key). Fallback: USDA FoodData Central
+   (free key from https://api.data.gov/signup) — better for generic/whole
+   foods and US branded UPCs. Leave key blank to disable USDA cleanly.       */
+const USDA_KEY = 'atacxlsNjojlOrTwquGwRvyOcrhRk1MtqLKwvfRa';
+function usdaOn(){ return USDA_KEY && USDA_KEY!=='REPLACE_WITH_USDA_KEY'; }
+
+/* ---- Search (merge both sources) ---- */
 async function doSearch(){
   const q=document.getElementById('searchInput').value.trim();
   const box=document.getElementById('searchResults');
   if(!q){ box.innerHTML=''; return; }
   box.innerHTML='<div class="loading"><span class="spinner"></span></div>';
-  try{
-    const url='https://world.openfoodfacts.org/cgi/search.pl?search_terms='+
-      encodeURIComponent(q)+'&search_simple=1&action=process&json=1&page_size=25'+
-      '&fields=product_name,brands,nutriments,serving_quantity,serving_size,code';
-    const res=await fetch(url);
-    const data=await res.json();
-    const foods=(data.products||[]).map(parseProduct).filter(Boolean);
-    if(!foods.length){ box.innerHTML='<div class="empty">No matches found.<br>Try a different name.</div>'; return; }
-    box.innerHTML=foods.map((f,i)=>foodCard(f,i,'search')).join('');
-    window._searchFoods=foods;
-  }catch(e){
-    box.innerHTML='<div class="empty">Couldn’t reach the food database.<br>Check your connection.</div>';
+  const [off,usda]=await Promise.allSettled([offSearch(q), usdaSearch(q)]);
+  let foods=[];
+  if(off.status==='fulfilled') foods=foods.concat(off.value);
+  if(usda.status==='fulfilled') foods=foods.concat(usda.value);
+  if(off.status==='rejected' && usda.status==='rejected'){
+    box.innerHTML='<div class="empty">Couldn’t reach the food database.<br>Check your connection.</div>'; return;
   }
+  const seen=new Set();
+  foods=foods.filter(f=>{ const k=(f.name+'|'+f.brand).toLowerCase().trim();
+    if(seen.has(k)) return false; seen.add(k); return true; });
+  if(!foods.length){ box.innerHTML='<div class="empty">No matches found.<br>Try a different name.</div>'; return; }
+  box.innerHTML=foods.map((f,i)=>foodCard(f,i,'search')).join('');
+  window._searchFoods=foods;
+}
+async function offSearch(q){
+  const url='https://world.openfoodfacts.org/cgi/search.pl?search_terms='+
+    encodeURIComponent(q)+'&search_simple=1&action=process&json=1&page_size=20'+
+    '&fields=product_name,brands,nutriments,serving_quantity,serving_size,code';
+  const res=await fetch(url); const data=await res.json();
+  return (data.products||[]).map(parseProduct).filter(Boolean);
+}
+async function usdaSearch(q){
+  if(!usdaOn()) return [];
+  const url='https://api.nal.usda.gov/fdc/v1/foods/search?api_key='+USDA_KEY+
+    '&query='+encodeURIComponent(q)+'&pageSize=20'+
+    '&dataType=Branded,Foundation,SR%20Legacy,Survey%20(FNDDS)';
+  const res=await fetch(url); const data=await res.json();
+  return (data.foods||[]).map(parseUsda).filter(Boolean);
 }
 
-/* ============ Open Food Facts: barcode ============ */
+/* ---- Barcode (Open Food Facts first, USDA fallback) ---- */
 async function lookupBarcode(code){
   toast('Looking up '+code+'…');
+  let f=await offBarcode(code);
+  if(!f && usdaOn()) f=await usdaBarcode(code);
+  if(!f){ toast('Product not found in either database'); return; }
+  openAddModal(f);
+}
+async function offBarcode(code){
   try{
     const url='https://world.openfoodfacts.org/api/v2/product/'+encodeURIComponent(code)+
       '.json?fields=product_name,brands,nutriments,serving_quantity,serving_size,code';
-    const res=await fetch(url);
-    const data=await res.json();
-    if(data.status!==1 || !data.product){ toast('Product not found in database'); return; }
-    const f=parseProduct(data.product);
-    if(!f){ toast('No nutrition data for this product'); return; }
-    openAddModal(f);
-  }catch(e){ toast('Lookup failed — check connection'); }
+    const res=await fetch(url); const data=await res.json();
+    if(data.status!==1 || !data.product) return null;
+    return parseProduct(data.product);
+  }catch(e){ return null; }
+}
+async function usdaBarcode(code){
+  try{
+    const url='https://api.nal.usda.gov/fdc/v1/foods/search?api_key='+USDA_KEY+
+      '&query='+encodeURIComponent(code)+'&dataType=Branded&pageSize=5';
+    const res=await fetch(url); const data=await res.json();
+    const strip=s=>String(s||'').replace(/^0+/,'');
+    const hit=(data.foods||[]).find(x=>strip(x.gtinUpc)===strip(code)) || (data.foods||[])[0];
+    return hit ? parseUsda(hit) : null;
+  }catch(e){ return null; }
+}
+
+/* ---- USDA parser (per-100g, mirrors parseProduct) ---- */
+function usdaNut(arr,num){
+  const n=(arr||[]).find(x=>String(x.nutrientNumber)===num);
+  return n!=null && n.value!=null ? +n.value : null;
+}
+function parseUsda(fd){
+  if(!fd) return null;
+  const ns=fd.foodNutrients||[];
+  let cal=usdaNut(ns,'208'); if(cal==null) cal=usdaNut(ns,'957');
+  if(cal==null) return null;
+  const g = (fd.servingSizeUnit && String(fd.servingSizeUnit).toLowerCase()==='g' && fd.servingSize)
+    ? Math.round(fd.servingSize) : null;
+  return {
+    name:(fd.description||'Unknown food').trim(),
+    brand:(fd.brandName||fd.brandOwner||'').split(',')[0].trim(),
+    cal:Math.round(cal),
+    p:round1(usdaNut(ns,'203')), c:round1(usdaNut(ns,'205')), f:round1(usdaNut(ns,'204')),
+    servingG:g, code:fd.gtinUpc||''
+  };
 }
 
 function parseProduct(p){
