@@ -138,6 +138,8 @@
     padding:12px;color:var(--text);font-size:16px;outline:none;text-align:center}
   .row input.amt{flex:0 0 90px}
   .row select{flex:1;background:var(--card2);border:1px solid var(--line);border-radius:11px;padding:12px;color:var(--text);font-size:15px;outline:none}
+  .row .gg{flex:0 0 56px;text-align:right;font-size:14px;font-weight:700;color:var(--accent)}
+  .gtot{text-align:center;font-size:13px;font-weight:600;margin:2px 0 16px}
   .seg{display:flex;gap:6px;margin-bottom:18px}
   .seg button{flex:1;background:var(--card2);color:var(--muted);padding:9px 4px;border-radius:11px;font-size:12.5px;font-weight:600}
   .seg button.on{background:var(--accent);color:#04140a}
@@ -249,6 +251,10 @@ fetch('foods.json').then(r=>r.json()).then(d=>{
 function todayKey(){return new Date().toISOString().slice(0,10);}
 function saveAll(){LS.set('ct_goals',goals);LS.set('ct_saved',saved);LS.set('ct_logs',logs);}
 function calcMacros(f,g){const r=g/100;return{cal:Math.round(f.cal*r),p:+(f.p*r).toFixed(1),c:+(f.c*r).toFixed(1),f:+(f.f*r).toFixed(1)};}
+function gG(cal,pct,k){return Math.round((+cal||0)*(+pct||0)/100/k);}  // grams from % of calories (k=kcal/g)
+function normalizeGoals(){ if(goals.pPct==null){const cal=goals.cal||2000;
+  goals.pPct=Math.round((goals.p||0)*4/cal*100);goals.cPct=Math.round((goals.c||0)*4/cal*100);
+  goals.fPct=Math.round((goals.f||0)*9/cal*100);} }
 function fkey(f){return (f.name+'|'+(f.brand||'')).toLowerCase().trim();}
 function defaultMeal(){const h=new Date().getHours();return h<11?'Breakfast':h<16?'Lunch':h<21?'Dinner':'Snacks';}
 
@@ -464,18 +470,32 @@ function saveCustomFood(){
 function editGoals(){
   document.getElementById('modal').innerHTML=`
     <div class="grab"></div>
-    <h3>Daily goals</h3><div class="msub">Set your targets</div>
-    <div class="row"><label>Calories</label><input id="gCal" type="number" inputmode="numeric" value="${goals.cal}"></div>
-    <div class="row"><label>Protein g</label><input id="gP" type="number" inputmode="numeric" value="${goals.p}"></div>
-    <div class="row"><label>Carbs g</label><input id="gC" type="number" inputmode="numeric" value="${goals.c}"></div>
-    <div class="row"><label>Fat g</label><input id="gF" type="number" inputmode="numeric" value="${goals.f}"></div>
+    <h3>Daily goals</h3><div class="msub">Set total calories, then the % of calories for each macro — grams calculate automatically.</div>
+    <div class="row"><label>Calories</label><input id="gCal" type="number" inputmode="numeric" value="${goals.cal}" oninput="updGoal()"></div>
+    <div class="row"><label>Protein %</label><input id="gPp" type="number" inputmode="numeric" value="${goals.pPct}" oninput="updGoal()"><span class="gg" id="ggP">0 g</span></div>
+    <div class="row"><label>Carbs %</label><input id="gCp" type="number" inputmode="numeric" value="${goals.cPct}" oninput="updGoal()"><span class="gg" id="ggC">0 g</span></div>
+    <div class="row"><label>Fat %</label><input id="gFp" type="number" inputmode="numeric" value="${goals.fPct}" oninput="updGoal()"><span class="gg" id="ggF">0 g</span></div>
+    <div class="gtot" id="gTot"></div>
     <div class="m-actions"><button class="cancel" onclick="closeModal()">Cancel</button>
       <button class="save" onclick="saveGoals()">Save</button></div>`;
-  showSheet('modalScrim','modal');
+  showSheet('modalScrim','modal'); updGoal();
 }
-function saveGoals(){goals={cal:+document.getElementById('gCal').value||2000,p:+document.getElementById('gP').value||0,
-  c:+document.getElementById('gC').value||0,f:+document.getElementById('gF').value||0};
-  saveAll();closeModal();renderDashboard();toast('Goals updated');}
+function updGoal(){
+  const cal=+document.getElementById('gCal').value||0;
+  const pp=+document.getElementById('gPp').value||0,cp=+document.getElementById('gCp').value||0,fp=+document.getElementById('gFp').value||0;
+  document.getElementById('ggP').textContent=gG(cal,pp,4)+' g';
+  document.getElementById('ggC').textContent=gG(cal,cp,4)+' g';
+  document.getElementById('ggF').textContent=gG(cal,fp,9)+' g';
+  const tot=pp+cp+fp, el=document.getElementById('gTot');
+  el.textContent='Macros total '+tot+'%'+(tot===100?'  ✓':'  · aim for 100%');
+  el.style.color=tot===100?'var(--accent)':'var(--muted)';
+}
+function saveGoals(){
+  const cal=+document.getElementById('gCal').value||2000;
+  const pPct=+document.getElementById('gPp').value||0,cPct=+document.getElementById('gCp').value||0,fPct=+document.getElementById('gFp').value||0;
+  goals={cal,pPct,cPct,fPct,p:gG(cal,pPct,4),c:gG(cal,cPct,4),f:gG(cal,fPct,9)};
+  saveAll();closeModal();renderDashboard();toast('Goals updated');
+}
 
 /* ===== Sheet helpers ===== */
 function showSheet(scrim,sheet){document.getElementById(scrim).classList.add('show');document.getElementById(sheet).classList.add('show');}
@@ -539,6 +559,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
+normalizeGoals();
 refresh();
 </script>
 </body>
