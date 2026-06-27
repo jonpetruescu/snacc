@@ -576,6 +576,17 @@ function enableDrag(sheetId,closeFn){
 /* ===== Cloud backup (GitHub, optional) ===== */
 function b64e(s){return btoa(unescape(encodeURIComponent(s)));}
 function b64d(s){return decodeURIComponent(escape(atob(s)));}
+function relTime(ts){const s=(Date.now()-ts)/1000;
+  if(s<60)return'just now';if(s<3600)return Math.floor(s/60)+'m ago';
+  if(s<86400)return Math.floor(s/3600)+'h ago';return new Date(ts).toLocaleDateString();}
+function renderVer(){
+  const cfg=LS.get('ct_gh',null);let s='Snacc '+APP_VERSION;
+  if(cfg&&cfg.token){
+    if(LS.get('ct_bkfail',0)) s+=' · ⚠ backup failed';
+    else{const lb=LS.get('ct_lastbackup',0);if(lb)s+=' · ☁ saved '+relTime(lb);}
+  }
+  document.getElementById('ver').textContent=s;
+}
 async function backupNow(silent){
   const cfg=LS.get('ct_gh',null);if(!cfg||!cfg.token||!cfg.owner||!cfg.repo)return;
   const data=JSON.stringify({goals,saved,logs,barcache});
@@ -586,9 +597,10 @@ async function backupNow(silent){
     let sha;const g=await fetch(url,{headers});if(g.status===200)sha=(await g.json()).sha;
     const body={message:'Snacc backup '+new Date().toISOString(),content:b64e(data)};if(sha)body.sha=sha;
     const p=await fetch(url,{method:'PUT',headers,body:JSON.stringify(body)});
-    if(p.ok){LS.set('ct_lastbackup',Date.now());LS.set('ct_lastpayload',data);if(!silent)toast('Backed up ✓');}
-    else if(!silent)toast('Backup failed ('+p.status+')');
-  }catch(e){if(!silent)toast('Backup failed — check connection');}
+    if(p.ok){LS.set('ct_lastbackup',Date.now());LS.set('ct_lastpayload',data);LS.set('ct_bkfail',0);if(!silent)toast('Backed up ✓');}
+    else{LS.set('ct_bkfail',1);if(!silent)toast('Backup failed ('+p.status+')');}
+  }catch(e){LS.set('ct_bkfail',1);if(!silent)toast('Backup failed — check connection');}
+  renderVer();
 }
 async function restoreNow(){
   const cfg=LS.get('ct_gh',null);if(!cfg||!cfg.token){toast('Enter your details first');return;}
@@ -686,8 +698,8 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v1.7 · 2026-06-27';
-document.getElementById('ver').textContent='Snacc '+APP_VERSION;
+const APP_VERSION='v1.8 · 2026-06-27';
+renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
   try{
