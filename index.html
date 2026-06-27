@@ -156,6 +156,7 @@
     color:var(--text);padding:12px 20px;border-radius:30px;font-size:14px;z-index:90;opacity:0;
     transition:opacity .25s;pointer-events:none;border:1px solid var(--line);max-width:90%;text-align:center}
   .toast.show{opacity:1}
+  .ver{text-align:center;color:#4a5160;font-size:11px;padding:10px 0 2px;letter-spacing:.3px}
 </style>
 </head>
 <body>
@@ -193,6 +194,7 @@
 </header>
 
 <main id="diary"></main>
+<div class="ver" id="ver"></div>
 
 <button class="fab" onclick="openAdd()">+</button>
 
@@ -578,6 +580,8 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
+const APP_VERSION='v1.1 · 2026-06-27';
+document.getElementById('ver').textContent='Snacc '+APP_VERSION;
 normalizeGoals();
 refresh();
 enableDrag('addSheet',closeAdd);
