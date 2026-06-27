@@ -387,7 +387,8 @@ function runSearch(q){
 /* ===== Portion modal ===== */
 function openPortion(food){
   pendingFood=food; selectedMeal=addMeal;
-  const amt=food.servingG||100;
+  const hasServ=!!food.servingG;
+  const amt=hasServ?1:100;
   const isSaved=saved.some(s=>fkey(s)===fkey(food));
   document.getElementById('modal').innerHTML=`
     <div class="grab"></div>
@@ -401,8 +402,8 @@ function openPortion(food){
     <div class="row">
       <input class="amt" id="amtInput" type="number" inputmode="decimal" value="${amt}" min="1" oninput="updMacros()">
       <select id="unitSel" onchange="onUnit()">
+        ${hasServ?`<option value="serv">serving (${food.servingG} g)</option>`:''}
         <option value="g">grams</option>
-        ${food.servingG?`<option value="serv">serving (${food.servingG} g)</option>`:''}
       </select></div>
     <div class="seg" id="mealSeg">${MEALS.map(m=>`<button class="${m===selectedMeal?'on':''}" onclick="setMeal('${m}')">${m}</button>`).join('')}</div>
     <div class="m-actions">
