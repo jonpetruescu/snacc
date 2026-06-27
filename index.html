@@ -583,6 +583,8 @@ refresh();
 enableDrag('addSheet',closeAdd);
 enableDrag('modal',closeModal);
 enableDrag('scanModal',closeScanner);
+// Auto-update: service worker checks the network for a fresh version each launch.
+if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));}
 </script>
 </body>
 </html>
