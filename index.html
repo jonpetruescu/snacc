@@ -631,8 +631,12 @@ function openSettings(){
   showSheet('modalScrim','modal');
 }
 function saveSettings(){
-  const cfg={owner:document.getElementById('sOwner').value.trim(),repo:document.getElementById('sRepo').value.trim(),token:document.getElementById('sToken').value.trim()};
-  LS.set('ct_gh',cfg);LS.set('ct_lastpayload','');toast('Saved');backupNow(false);
+  const owner=document.getElementById('sOwner').value.trim();
+  const repo=document.getElementById('sRepo').value.trim();
+  const token=document.getElementById('sToken').value.trim();
+  if(!owner||!repo||!token){toast('Fill in user, repo, and token');return;}
+  LS.set('ct_gh',{owner,repo,token});LS.set('ct_lastpayload','');
+  toast('Backing up…');backupNow(false);
 }
 
 /* ===== Food databases (barcode + USDA) ===== */
@@ -698,7 +702,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v1.8 · 2026-06-27';
+const APP_VERSION='v1.9 · 2026-06-27';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
