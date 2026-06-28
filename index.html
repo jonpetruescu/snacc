@@ -255,7 +255,8 @@ fetch('foods.json').then(r=>r.json()).then(d=>{
   LOCAL_FOODS=d.map(x=>({name:x.n,brand:'',cal:x.cal,p:x.p,c:x.c,f:x.f,servingG:x.g||null}));
 }).catch(()=>{});
 
-function todayKey(){return new Date().toISOString().slice(0,10);}
+function dateKey(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function todayKey(){return dateKey(new Date());}
 function saveAll(){LS.set('ct_goals',goals);LS.set('ct_saved',saved);LS.set('ct_logs',logs);}
 function calcMacros(f,g){const r=g/100;return{cal:Math.round(f.cal*r),p:+(f.p*r).toFixed(1),c:+(f.c*r).toFixed(1),f:+(f.f*r).toFixed(1)};}
 function gG(cal,pct,k){return Math.round((+cal||0)*(+pct||0)/100/k);}  // grams from % of calories (k=kcal/g)
@@ -285,9 +286,9 @@ function setMacro(v,goal,tid,fid){document.getElementById(tid).textContent=`${v}
 
 /* ===== Date nav ===== */
 function fmtDate(k){if(k===todayKey())return'Today';
-  const y=new Date();y.setDate(y.getDate()-1);if(k===y.toISOString().slice(0,10))return'Yesterday';
+  const y=new Date();y.setDate(y.getDate()-1);if(k===dateKey(y))return'Yesterday';
   return new Date(k+'T12:00').toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});}
-function changeDay(n){const d=new Date(curDate+'T12:00');d.setDate(d.getDate()+n);curDate=d.toISOString().slice(0,10);refresh();}
+function changeDay(n){const d=new Date(curDate+'T12:00');d.setDate(d.getDate()+n);curDate=dateKey(d);refresh();}
 function goToday(){curDate=todayKey();refresh();}
 function refresh(){document.getElementById('dateLabel').textContent=fmtDate(curDate);renderDashboard();renderDiary();}
 
@@ -714,7 +715,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v2.3 · 2026-06-27';
+const APP_VERSION='v2.4 · 2026-06-27';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
