@@ -213,6 +213,7 @@
     <div class="add-actions">
       <button onclick="openCustomForm()">＋ Custom</button>
       <button onclick="openQuickAdd()">⚡ Quick cals</button>
+      <button onclick="newRecipe()">🍲 Recipe</button>
     </div>
   </div>
   <div class="add-results" id="addResults"></div>
@@ -248,6 +249,8 @@ let logs =LS.get('ct_logs',{});
 let curDate=todayKey();
 let pendingFood=null, selectedMeal='Snacks', addMeal='Snacks', editingId=null;
 let barcache=LS.get('ct_barcache',{});
+let recipes=LS.get('ct_recipes',[]);
+let recipeDraft=null, addTarget='log', editIngIdx=null;
 const MEALS=['Breakfast','Lunch','Dinner','Snacks'];
 const MICON={Breakfast:'🍳',Lunch:'🥗',Dinner:'🍝',Snacks:'🍎'};
 const reg={results:[],quick:[]};
@@ -259,7 +262,7 @@ fetch('foods.json').then(r=>r.json()).then(d=>{
 
 function dateKey(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function todayKey(){return dateKey(new Date());}
-function saveAll(){LS.set('ct_goals',goals);LS.set('ct_saved',saved);LS.set('ct_logs',logs);}
+function saveAll(){LS.set('ct_goals',goals);LS.set('ct_saved',saved);LS.set('ct_logs',logs);LS.set('ct_recipes',recipes);}
 function calcMacros(f,g){const r=g/100;return{cal:Math.round(f.cal*r),p:+(f.p*r).toFixed(1),c:+(f.c*r).toFixed(1),f:+(f.f*r).toFixed(1)};}
 function gG(cal,pct,k){return Math.round((+cal||0)*(+pct||0)/100/k);}  // grams from % of calories (k=kcal/g)
 function normalizeGoals(){ if(goals.pPct==null){const cal=goals.cal||2000;
@@ -330,6 +333,7 @@ function removeEntry(id){logs[curDate]=(logs[curDate]||[]).filter(e=>e.id!==id);
 
 /* ===== Add sheet ===== */
 function openAdd(meal){
+  addTarget='log';editIngIdx=null;
   addMeal=meal||defaultMeal();
   document.getElementById('addMealLabel').textContent=addMeal;
   document.getElementById('addSearch').value='';
@@ -337,7 +341,8 @@ function openAdd(meal){
   showSheet('addScrim','addSheet');
   setTimeout(()=>document.getElementById('addSearch').focus(),250);
 }
-function closeAdd(){hideSheet('addScrim','addSheet');}
+function closeAdd(){const backToRecipe=addTarget==='recipe'&&recipeDraft;
+  hideSheet('addScrim','addSheet');if(backToRecipe)openRecipeBuilder();}
 
 function entryBase(e){if(e.b)return e.b;const a=e.amount||100,r=100/a;
   return{cal:Math.round(e.cal*r),p:+(e.p*r).toFixed(1),c:+(e.c*r).toFixed(1),f:+(e.f*r).toFixed(1),g:a};}
@@ -360,14 +365,22 @@ function freqFoods(){
   }));
   return Object.keys(count).sort((a,b)=>count[b]-count[a]).map(k=>sample[k]);
 }
+function recipeCard(r){const t=recipeTotals(r),sv=r.servings||1,n=(r.items||[]).length;
+  return `<div class="fcard"><div class="fi" onclick="logRecipe('${r.id}')">
+    <div class="fn">🍲 ${esc(r.name)}</div>
+    <div class="fs">${Math.round(t.cal/sv)} kcal / serving · ${n} ingredient${n===1?'':'s'}</div></div>
+    <button class="del" onclick="editRecipe('${r.id}')" title="Edit">✎</button></div>`;}
 function renderQuick(){
   const seen=new Set(),list=[];
   saved.concat(freqFoods()).forEach(f=>{const k=fkey(f);if(!seen.has(k)){seen.add(k);list.push(f);}});
   reg.quick=list.slice(0,25);
   const box=document.getElementById('addResults');
-  box.innerHTML=reg.quick.length
-    ? '<div class="sec-label">Saved & frequent</div>'+reg.quick.map((f,i)=>fcard(f,i,'quick')).join('')
-    : '<div class="empty">Search a food, scan a barcode,<br>or add a custom food.</div>';
+  let html='';
+  if(addTarget!=='recipe'&&recipes.length)
+    html+='<div class="sec-label">Recipes</div>'+recipes.map(recipeCard).join('');
+  if(reg.quick.length)
+    html+='<div class="sec-label">Saved & frequent</div>'+reg.quick.map((f,i)=>fcard(f,i,'quick')).join('');
+  box.innerHTML=html||'<div class="empty">Search a food, scan a barcode,<br>or add a custom food.</div>';
 }
 function fcard(f,i,which){
   let calDisplay,basis;
@@ -413,16 +426,18 @@ function runSearch(q){
 function openPortion(food,editId,ex){
   pendingFood=food; editingId=editId||null;
   selectedMeal=ex?ex.meal:addMeal;
-  const editing=!!editId, ps=!!food.ps, hasServ=!!food.servingG;
+  const editing=!!editId, ps=!!food.ps, hasServ=!!food.servingG, rmode=addTarget==='recipe';
   let unit,amt;
   if(ps){unit='serv';amt=editing?+(ex.amount/(food.servingG||100)).toFixed(2):1;}
   else if(editing){unit='g';amt=ex.amount;} else if(hasServ){unit='serv';amt=1;} else {unit='g';amt=100;}
-  const servLabel=ps?esc(food.sl||'serving'):(food.sl?esc(food.sl)+', '+food.servingG+' g':food.servingG+' g');
+  const slClean=(food.sl&&food.sl!=='serving')?food.sl:'';
+  const servOpt=ps?('serving'+(slClean?' ('+esc(slClean)+')':'')):('serving ('+(food.sl?esc(food.sl)+', ':'')+food.servingG+' g)');
+  const perLabel=ps?('per '+(slClean?esc(slClean):'serving')):'per 100g';
   const isSaved=saved.some(s=>fkey(s)===fkey(food));
   document.getElementById('modal').innerHTML=`
     <div class="grab"></div>
     <h3>${esc(food.name)}</h3>
-    <div class="msub">${food.brand?esc(food.brand)+' · ':''}${ps?food.cal+' kcal per '+esc(food.sl||'serving'):food.cal+' kcal per 100g'}</div>
+    <div class="msub">${food.brand?esc(food.brand)+' · ':''}${food.cal} kcal ${perLabel}</div>
     <div class="nutri-grid">
       <div class="nbox"><div class="nv" id="mCal">0</div><div class="nl">kcal</div></div>
       <div class="nbox"><div class="nv" id="mP">0</div><div class="nl">protein</div></div>
@@ -431,17 +446,18 @@ function openPortion(food,editId,ex){
     <div class="row">
       <input class="amt" id="amtInput" type="number" inputmode="decimal" value="${amt}" min="${ps?'0.25':'1'}" step="${ps?'0.25':'1'}" oninput="updMacros()">
       <select id="unitSel" onchange="onUnit()">
-        ${(hasServ||ps)?`<option value="serv" ${unit==='serv'?'selected':''}>serving (${servLabel})</option>`:''}
+        ${(hasServ||ps)?`<option value="serv" ${unit==='serv'?'selected':''}>${servOpt}</option>`:''}
         ${ps?'':`<option value="g" ${unit==='g'?'selected':''}>grams</option>`}
       </select></div>
-    <div class="seg" id="mealSeg">${MEALS.map(m=>`<button class="${m===selectedMeal?'on':''}" onclick="setMeal('${m}')">${m}</button>`).join('')}</div>
+    ${rmode?'':`<div class="seg" id="mealSeg">${MEALS.map(m=>`<button class="${m===selectedMeal?'on':''}" onclick="setMeal('${m}')">${m}</button>`).join('')}</div>`}
     <div class="m-actions">
-      <button class="star ${isSaved?'on':''}" id="starBtn" onclick="toggleSave()">★</button>
-      <button class="cancel" onclick="closeModal()">Cancel</button>
-      <button class="save" onclick="confirmAdd()">${editing?'Save':'Add'}</button></div>`;
+      ${rmode?'':`<button class="star ${isSaved?'on':''}" id="starBtn" onclick="toggleSave()">★</button>`}
+      <button class="cancel" onclick="${rmode?'backToBuilder()':'closeModal()'}">Cancel</button>
+      <button class="save" onclick="confirmAdd()">${rmode?(editIngIdx!=null?'Update ingredient':'Add to recipe'):(editing?'Save':'Add')}</button></div>`;
   updMacros();
   showSheet('modalScrim','modal');
 }
+function backToBuilder(){closeModal();if(recipeDraft)openRecipeBuilder();}
 function curGrams(){const v=parseFloat(document.getElementById('amtInput').value)||0;
   return document.getElementById('unitSel').value==='serv'?v*(pendingFood.servingG||100):v;}
 function updMacros(){const m=calcMacros(pendingFood,curGrams());
@@ -455,6 +471,13 @@ function confirmAdd(){
   const b={cal:pendingFood.cal,p:pendingFood.p,c:pendingFood.c,f:pendingFood.f,g:pendingFood.servingG||100};
   if(pendingFood.sl)b.sl=pendingFood.sl;
   if(pendingFood.ps)b.ps=true;
+  if(addTarget==='recipe'){
+    const item={name:pendingFood.name,brand:pendingFood.brand||'',b,
+      qty:pendingFood.ps?+(g/(pendingFood.servingG||100)).toFixed(2):Math.round(g),ps:!!pendingFood.ps,sl:pendingFood.sl||''};
+    if(editIngIdx!=null&&recipeDraft.items[editIngIdx])recipeDraft.items[editIngIdx]=item;
+    else recipeDraft.items.push(item);
+    editIngIdx=null;hideSheet('addScrim','addSheet');closeModal();openRecipeBuilder();toast('Ingredient added');return;
+  }
   if(editingId){
     const e=(logs[curDate]||[]).find(x=>x.id===editingId);
     if(e){e.meal=selectedMeal;e.amount=Math.round(g);e.cal=m.cal;e.p=m.p;e.c=m.c;e.f=m.f;e.b=b;delete e.quick;}
@@ -477,6 +500,7 @@ function openEditEntry(id){
   openPortion({name:e.name,brand:e.brand||'',cal:b.cal,p:b.p,c:b.c,f:b.f,servingG:b.g,sl:b.sl,ps:b.ps},e.id,e);
 }
 function openQuickAdd(ex){
+  if(addTarget==='recipe'&&!ex){toast('Search or add a custom food as an ingredient');return;}
   editingId=ex?ex.id:null; selectedMeal=ex?ex.meal:addMeal;
   document.getElementById('modal').innerHTML=`
     <div class="grab"></div>
@@ -538,6 +562,81 @@ function saveCustomFood(){
   openPortion({...food});
 }
 
+/* ===== Recipes ===== */
+function itemMacros(it){return calcMacros(it.b, it.ps?it.qty*100:it.qty);}
+function itemAmtLabel(it){return it.ps?(it.qty+' × '+(it.sl||'serving')):(it.qty+' g');}
+function recipeTotals(rec){let t={cal:0,p:0,c:0,f:0};
+  (rec.items||[]).forEach(it=>{const m=itemMacros(it);t.cal+=m.cal;t.p+=m.p;t.c+=m.c;t.f+=m.f;});
+  return{cal:Math.round(t.cal),p:+t.p.toFixed(1),c:+t.c.toFixed(1),f:+t.f.toFixed(1)};}
+function newRecipe(){recipeDraft={id:'r'+Date.now()+Math.random().toString(36).slice(2,5),name:'',servings:1,totalG:null,items:[]};
+  closeAdd();openRecipeBuilder();}
+function editRecipe(id){const r=recipes.find(x=>x.id===id);if(!r)return;
+  recipeDraft=JSON.parse(JSON.stringify(r));closeAdd();openRecipeBuilder();}
+function openRecipeBuilder(){
+  const r=recipeDraft,t=recipeTotals(r),sv=r.servings||1;
+  const per={cal:Math.round(t.cal/sv),p:+(t.p/sv).toFixed(1),c:+(t.c/sv).toFixed(1),f:+(t.f/sv).toFixed(1)};
+  const rows=(r.items||[]).map((it,i)=>{const m=itemMacros(it);
+    return `<div class="entry"><div class="info" onclick="editIngredient(${i})">
+      <div class="en">${esc(it.name)}</div>
+      <div class="es">${esc(itemAmtLabel(it))} · ${m.cal} kcal · ${m.p}p ${m.c}c ${m.f}f</div></div>
+      <button class="del" onclick="removeIngredient(${i});event.stopPropagation()">✕</button></div>`;}).join('');
+  const isExisting=recipes.some(x=>x.id===r.id);
+  document.getElementById('modal').innerHTML=`
+    <div class="grab"></div>
+    <h3>${isExisting?'Edit recipe':'New recipe'}</h3>
+    <div class="msub">Add ingredients, set how many servings it makes. Total cooked weight is optional — add it to also log by grams.</div>
+    <div class="row"><label>Name</label><input id="rcName" type="text" value="${esc(r.name||'')}" placeholder="e.g. Chili" style="text-align:left" oninput="recipeDraft.name=this.value"></div>
+    <div class="row"><label>Servings</label><input id="rcServ" type="number" inputmode="decimal" min="1" value="${sv}" oninput="recipeDraft.servings=parseFloat(this.value)||1;rcRefresh()"></div>
+    <div class="row"><label>Total g</label><input id="rcTotal" type="number" inputmode="decimal" value="${r.totalG||''}" placeholder="cooked weight (optional)" oninput="recipeDraft.totalG=parseFloat(this.value)||null"></div>
+    <div class="sec-label" style="margin-top:6px">Ingredients</div>
+    ${rows||'<div class="meal-empty">No ingredients yet — tap ＋ below</div>'}
+    <button class="goal-edit" style="margin:8px auto;display:block" onclick="addIngredient()">＋ Add ingredient</button>
+    <div class="nutri-grid">
+      <div class="nbox"><div class="nv" id="rcCal">${per.cal}</div><div class="nl">kcal/serv</div></div>
+      <div class="nbox"><div class="nv" id="rcP">${per.p}</div><div class="nl">protein</div></div>
+      <div class="nbox"><div class="nv" id="rcC">${per.c}</div><div class="nl">carbs</div></div>
+      <div class="nbox"><div class="nv" id="rcF">${per.f}</div><div class="nl">fat</div></div></div>
+    <div class="gtot" id="rcTot">Whole recipe: ${t.cal} kcal · ${t.p}p ${t.c}c ${t.f}f</div>
+    <div class="m-actions">
+      ${isExisting?`<button class="cancel" onclick="deleteRecipe('${r.id}')">Delete</button>`:`<button class="cancel" onclick="closeModal()">Cancel</button>`}
+      <button class="save" onclick="saveRecipe()">Save recipe</button></div>`;
+  showSheet('modalScrim','modal');
+}
+function rcRefresh(){const r=recipeDraft,t=recipeTotals(r),sv=r.servings||1;
+  document.getElementById('rcCal').textContent=Math.round(t.cal/sv);
+  document.getElementById('rcP').textContent=+(t.p/sv).toFixed(1);
+  document.getElementById('rcC').textContent=+(t.c/sv).toFixed(1);
+  document.getElementById('rcF').textContent=+(t.f/sv).toFixed(1);
+  document.getElementById('rcTot').textContent=`Whole recipe: ${t.cal} kcal · ${t.p}p ${t.c}c ${t.f}f`;}
+function addIngredient(){addTarget='recipe';editIngIdx=null;closeModal();
+  document.getElementById('addMealLabel').textContent='recipe';
+  document.getElementById('addSearch').value='';renderQuick();
+  showSheet('addScrim','addSheet');
+  setTimeout(()=>document.getElementById('addSearch').focus(),250);}
+function editIngredient(i){const it=recipeDraft.items[i];if(!it)return;
+  addTarget='recipe';editIngIdx=i;closeAdd();
+  openPortion({name:it.name,brand:it.brand||'',cal:it.b.cal,p:it.b.p,c:it.b.c,f:it.b.f,servingG:it.b.g,sl:it.b.sl||it.sl,ps:it.ps});}
+function removeIngredient(i){recipeDraft.items.splice(i,1);openRecipeBuilder();}
+function saveRecipe(){const r=recipeDraft;
+  r.name=(document.getElementById('rcName').value||'').trim();
+  if(!r.name){toast('Name your recipe');return;}
+  if(!r.items.length){toast('Add at least one ingredient');return;}
+  r.servings=parseFloat(document.getElementById('rcServ').value)||1;
+  r.totalG=parseFloat(document.getElementById('rcTotal').value)||null;
+  const idx=recipes.findIndex(x=>x.id===r.id);
+  if(idx>=0)recipes[idx]=r;else recipes.unshift(r);
+  saveAll();addTarget='log';recipeDraft=null;closeModal();renderQuick();toast('Recipe saved');
+}
+function deleteRecipe(id){recipes=recipes.filter(x=>x.id!==id);saveAll();addTarget='log';recipeDraft=null;closeModal();renderQuick();toast('Recipe deleted');}
+function recipeFood(rec){const t=recipeTotals(rec),sv=rec.servings||1;
+  if(rec.totalG>0){const r=100/rec.totalG;
+    return{name:rec.name,brand:'',cal:Math.round(t.cal*r),p:+(t.p*r).toFixed(1),c:+(t.c*r).toFixed(1),f:+(t.f*r).toFixed(1),
+      servingG:Math.max(1,Math.round(rec.totalG/sv))};}
+  return{name:rec.name,brand:'',cal:Math.round(t.cal/sv),p:+(t.p/sv).toFixed(1),c:+(t.c/sv).toFixed(1),f:+(t.f/sv).toFixed(1),
+    servingG:100,sl:'serving',ps:true};}
+function logRecipe(id){const r=recipes.find(x=>x.id===id);if(!r)return;
+  addTarget='log';openPortion(recipeFood(r));}
+
 /* ===== Goals ===== */
 function editGoals(){
   document.getElementById('modal').innerHTML=`
@@ -573,10 +672,13 @@ function saveGoals(){
 let sheetCount=0, scrollLockY=0;
 function lockBody(){scrollLockY=window.scrollY||window.pageYOffset||0;document.body.style.top=(-scrollLockY)+'px';document.body.classList.add('locked');}
 function unlockBody(){document.body.classList.remove('locked');document.body.style.top='';window.scrollTo(0,scrollLockY);}
-function showSheet(scrim,sheet){if(sheetCount===0)lockBody();sheetCount++;
-  document.getElementById(scrim).classList.add('show');document.getElementById(sheet).classList.add('show');}
-function hideSheet(scrim,sheet){document.getElementById(scrim).classList.remove('show');document.getElementById(sheet).classList.remove('show');
-  sheetCount=Math.max(0,sheetCount-1);if(sheetCount===0)unlockBody();}
+function showSheet(scrim,sheet){const el=document.getElementById(sheet);
+  document.getElementById(scrim).classList.add('show');
+  if(el.classList.contains('show'))return;            // already open → don't double-count
+  if(sheetCount===0)lockBody();sheetCount++;el.classList.add('show');}
+function hideSheet(scrim,sheet){const el=document.getElementById(sheet),was=el.classList.contains('show');
+  document.getElementById(scrim).classList.remove('show');el.classList.remove('show');
+  if(was){sheetCount=Math.max(0,sheetCount-1);if(sheetCount===0)unlockBody();}}
 // Drag the sheet down to dismiss. Ignores touches on inputs/buttons and scroll areas.
 function enableDrag(sheetId,closeFn){
   const sheet=document.getElementById(sheetId);let startY=0,dy=0,drag=false;
@@ -604,7 +706,7 @@ function renderVer(){
 }
 async function backupNow(silent){
   const cfg=LS.get('ct_gh',null);if(!cfg||!cfg.token||!cfg.owner||!cfg.repo)return;
-  const data=JSON.stringify({goals,saved,logs,barcache});
+  const data=JSON.stringify({goals,saved,logs,barcache,recipes});
   if(silent&&data===LS.get('ct_lastpayload',''))return;        // nothing changed → skip
   const url=`https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/snacc-backup.json`;
   const headers={Authorization:'Bearer '+cfg.token,Accept:'application/vnd.github+json'};
@@ -629,6 +731,7 @@ async function restoreNow(){
     if(g.status!==200){toast(g.status===404?'No backup found in that repo':'Restore failed ('+g.status+')');return;}
     const data=JSON.parse(b64d((await g.json()).content));
     if(data.goals)goals=data.goals;if(data.saved)saved=data.saved;if(data.logs)logs=data.logs;
+    if(data.recipes)recipes=data.recipes;
     if(data.barcache){barcache=data.barcache;LS.set('ct_barcache',barcache);}
     saveAll();normalizeGoals();
     // Save creds for future auto-backups, and mark this exact state as already-backed-up
@@ -831,7 +934,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v2.8 · 2026-06-28';
+const APP_VERSION='v2.9 · 2026-06-28';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
