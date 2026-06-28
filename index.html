@@ -213,7 +213,6 @@
     <div class="add-actions">
       <button onclick="openCustomForm()">＋ Custom</button>
       <button onclick="openQuickAdd()">⚡ Quick cals</button>
-      <button onclick="changeAddMeal()">🍽 <span id="addMealBtn">Snacks</span></button>
     </div>
   </div>
   <div class="add-results" id="addResults"></div>
@@ -333,16 +332,12 @@ function removeEntry(id){logs[curDate]=(logs[curDate]||[]).filter(e=>e.id!==id);
 function openAdd(meal){
   addMeal=meal||defaultMeal();
   document.getElementById('addMealLabel').textContent=addMeal;
-  document.getElementById('addMealBtn').textContent=addMeal;
   document.getElementById('addSearch').value='';
   renderQuick();
   showSheet('addScrim','addSheet');
   setTimeout(()=>document.getElementById('addSearch').focus(),250);
 }
 function closeAdd(){hideSheet('addScrim','addSheet');}
-function changeAddMeal(){const i=MEALS.indexOf(addMeal);addMeal=MEALS[(i+1)%MEALS.length];
-  document.getElementById('addMealLabel').textContent=addMeal;
-  document.getElementById('addMealBtn').textContent=addMeal;toast('Adding to '+addMeal);}
 
 function entryBase(e){if(e.b)return e.b;const a=e.amount||100,r=100/a;
   return{cal:Math.round(e.cal*r),p:+(e.p*r).toFixed(1),c:+(e.c*r).toFixed(1),f:+(e.f*r).toFixed(1),g:a};}
@@ -833,7 +828,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v2.6 · 2026-06-27';
+const APP_VERSION='v2.7 · 2026-06-27';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
