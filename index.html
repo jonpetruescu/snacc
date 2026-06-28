@@ -44,6 +44,9 @@
     display:flex;align-items:center;justify-content:center;color:#2a1400;font-weight:900;font-size:20px;
     box-shadow:0 4px 12px rgba(255,138,61,.42)}
   .brand h1{font-size:23px;letter-spacing:-.4px;font-weight:800}
+  .hdr-actions{display:flex;align-items:center;gap:10px}
+  .hicon{width:34px;height:34px;border-radius:10px;background:var(--card);
+    font-size:18px;display:flex;align-items:center;justify-content:center;border:1px solid var(--card2)}
   .date-nav{display:flex;gap:6px;align-items:center}
   .date-nav button{width:34px;height:34px;border-radius:10px;background:var(--card);
     font-size:17px;color:var(--muted);display:flex;align-items:center;justify-content:center}
@@ -168,10 +171,13 @@
 <header>
   <div class="date-row">
     <div class="brand"><div class="logo">S</div><h1>Snacc</h1></div>
-    <div class="date-nav">
-      <button onclick="changeDay(-1)">‹</button>
-      <span class="dlabel" id="dateLabel" onclick="goToday()">Today</span>
-      <button onclick="changeDay(1)">›</button>
+    <div class="hdr-actions">
+      <button class="hicon" onclick="openRecipes()" title="Recipes">🍲</button>
+      <div class="date-nav">
+        <button onclick="changeDay(-1)">‹</button>
+        <span class="dlabel" id="dateLabel" onclick="goToday()">Today</span>
+        <button onclick="changeDay(1)">›</button>
+      </div>
     </div>
   </div>
   <div class="dash">
@@ -217,6 +223,17 @@
     </div>
   </div>
   <div class="add-results" id="addResults"></div>
+</div>
+
+<!-- Recipes page -->
+<div class="scrim" id="recipesScrim" onclick="closeRecipes()"></div>
+<div class="sheet" id="recipesSheet">
+  <div class="grab"></div>
+  <div class="add-top">
+    <div class="add-title">Your recipes</div>
+    <div class="add-actions"><button onclick="newRecipe()">＋ New recipe</button></div>
+  </div>
+  <div class="add-results" id="recipesList"></div>
 </div>
 
 <!-- Portion / form modal -->
@@ -625,9 +642,9 @@ function saveRecipe(){const r=recipeDraft;
   r.totalG=parseFloat(document.getElementById('rcTotal').value)||null;
   const idx=recipes.findIndex(x=>x.id===r.id);
   if(idx>=0)recipes[idx]=r;else recipes.unshift(r);
-  saveAll();addTarget='log';recipeDraft=null;closeModal();renderQuick();toast('Recipe saved');
+  saveAll();addTarget='log';recipeDraft=null;closeModal();renderQuick();if(recipesPageOpen())renderRecipesPage();toast('Recipe saved');
 }
-function deleteRecipe(id){recipes=recipes.filter(x=>x.id!==id);saveAll();addTarget='log';recipeDraft=null;closeModal();renderQuick();toast('Recipe deleted');}
+function deleteRecipe(id){recipes=recipes.filter(x=>x.id!==id);saveAll();addTarget='log';recipeDraft=null;closeModal();renderQuick();if(recipesPageOpen())renderRecipesPage();toast('Recipe deleted');}
 function recipeFood(rec){const t=recipeTotals(rec),sv=rec.servings||1;
   if(rec.totalG>0){const r=100/rec.totalG;
     return{name:rec.name,brand:'',cal:Math.round(t.cal*r),p:+(t.p*r).toFixed(1),c:+(t.c*r).toFixed(1),f:+(t.f*r).toFixed(1),
@@ -636,6 +653,17 @@ function recipeFood(rec){const t=recipeTotals(rec),sv=rec.servings||1;
     servingG:100,sl:'serving',ps:true};}
 function logRecipe(id){const r=recipes.find(x=>x.id===id);if(!r)return;
   addTarget='log';openPortion(recipeFood(r));}
+function openRecipes(){closeAdd();renderRecipesPage();showSheet('recipesScrim','recipesSheet');}
+function closeRecipes(){hideSheet('recipesScrim','recipesSheet');}
+function recipesPageOpen(){return document.getElementById('recipesSheet').classList.contains('show');}
+function recipeMgmtCard(r){const t=recipeTotals(r),sv=r.servings||1,n=(r.items||[]).length;
+  return `<div class="fcard" onclick="editRecipe('${r.id}')"><div class="fi">
+    <div class="fn">🍲 ${esc(r.name)}</div>
+    <div class="fs">${Math.round(t.cal/sv)} kcal / serving · ${n} ingredient${n===1?'':'s'} · makes ${sv}</div></div>
+    <div class="fp">›</div></div>`;}
+function renderRecipesPage(){const box=document.getElementById('recipesList');
+  box.innerHTML=recipes.length?recipes.map(recipeMgmtCard).join('')
+    :'<div class="empty">No recipes yet.<br>Tap ＋ New recipe to build one.</div>';}
 
 /* ===== Goals ===== */
 function editGoals(){
@@ -934,7 +962,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v2.9 · 2026-06-28';
+const APP_VERSION='v3.0 · 2026-06-28';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
