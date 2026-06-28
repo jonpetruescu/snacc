@@ -235,6 +235,9 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- Hidden camera input for nutrition-label OCR fallback -->
+<input id="labelCam" type="file" accept="image/*" capture="environment" style="display:none" onchange="onLabelPhoto(event)">
+
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
 /* ===== Storage ===== */
@@ -638,16 +641,20 @@ function openSettings(){
     <div class="row"><label>Data repo</label><input id="sRepo" type="text" value="${esc(cfg.repo||'')}" placeholder="snacc-data" style="text-align:left"></div>
     <div class="row"><label>Token</label><input id="sToken" type="password" value="${esc(cfg.token||'')}" placeholder="github_pat_…" style="text-align:left"></div>
     <div class="gtot">${last?'Last backup: '+new Date(last).toLocaleString():'No backup yet'}</div>
+    <h3 style="margin-top:18px">Label scanning</h3>
+    <div class="msub">When a scanned barcode isn't in any database, snap the Nutrition Facts label and Gemini reads it. Key stays on this device. Get a free key at aistudio.google.com/apikey.</div>
+    <div class="row"><label>Gemini key</label><input id="sGemini" type="password" value="${esc(LS.get('ct_gemini','')||'')}" placeholder="AIza…" style="text-align:left" onchange="LS.set('ct_gemini',this.value.trim());toast('Gemini key saved')"></div>
     <div class="m-actions"><button class="cancel" onclick="restoreNow()">Restore</button>
       <button class="save" onclick="saveSettings()">Save &amp; back up</button></div>
     <div style="text-align:center;margin-top:12px"><button class="goal-edit" onclick="closeModal()">Close</button></div>`;
   showSheet('modalScrim','modal');
 }
 function saveSettings(){
+  const gem=document.getElementById('sGemini');if(gem)LS.set('ct_gemini',gem.value.trim());
   const owner=document.getElementById('sOwner').value.trim();
   const repo=document.getElementById('sRepo').value.trim();
   const token=document.getElementById('sToken').value.trim();
-  if(!owner||!repo||!token){toast('Fill in user, repo, and token');return;}
+  if(!owner||!repo||!token){toast('Gemini key saved. Fill in user, repo, and token for backup.');return;}
   LS.set('ct_gh',{owner,repo,token});LS.set('ct_lastpayload','');
   toast('Backing up…');backupNow(false);
 }
@@ -666,7 +673,7 @@ async function lookupBarcode(code){
   toast('Looking up…');
   const [o,u]=await Promise.allSettled([offBarcode(code),usdaOn()?usdaBarcode(code):Promise.resolve(null)]);
   const f=(o.status==='fulfilled'&&o.value)||(u.status==='fulfilled'&&u.value)||null;
-  if(!f){toast('Product not found in either database');return;}
+  if(!f){offerLabelScan(code);return;}
   barcache[code]=f;LS.set('ct_barcache',barcache);openPortion(f);}
 async function offBarcode(code){try{
   const url='https://world.openfoodfacts.org/api/v2/product/'+encodeURIComponent(code)+
@@ -693,6 +700,91 @@ function parseUsda(fd){if(!fd)return null;const ns=fd.foodNutrients||[];
   return{name:(fd.description||'Unknown food').trim(),brand:(fd.brandName||fd.brandOwner||'').split(',')[0].trim(),
     cal:Math.round(cal),p:round1(usdaNut(ns,'203')),c:round1(usdaNut(ns,'205')),f:round1(usdaNut(ns,'204')),servingG:g,code:fd.gtinUpc||''};}
 
+/* ===== Nutrition-label OCR fallback (Gemini Vision) ===== */
+let pendingLabelCode='';
+function offerLabelScan(code){
+  if(!LS.get('ct_gemini','')){
+    toast('Not found. Add a Gemini key in Settings to scan labels.');return;}
+  pendingLabelCode=code||'';
+  document.getElementById('modal').innerHTML=`
+    <div class="grab"></div>
+    <h3>Not in our databases</h3>
+    <div class="msub">Take a clear photo of the <b>Nutrition Facts</b> label — we'll read it and remember it for this barcode.</div>
+    <div class="m-actions">
+      <button class="cancel" onclick="closeModal()">Cancel</button>
+      <button class="save" onclick="document.getElementById('labelCam').click()">📷 Scan label</button></div>`;
+  showSheet('modalScrim','modal');
+}
+function onLabelPhoto(ev){
+  const file=ev.target.files&&ev.target.files[0];ev.target.value='';
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=()=>{const b64=String(reader.result).split(',')[1];readLabel(b64,file.type||'image/jpeg');};
+  reader.readAsDataURL(file);
+}
+async function readLabel(b64,mime){
+  const key=LS.get('ct_gemini','');if(!key){toast('Add a Gemini API key in Settings');return;}
+  closeModal();toast('Reading label…');
+  const prompt=`You are reading a packaged-food Nutrition Facts label from a photo. Respond with ONLY a JSON object, no markdown, with these exact keys:
+{"name": string, "brand": string, "serving_g": number, "cal": number, "protein": number, "carbs": number, "fat": number}
+Rules:
+- name: the food/product name if visible, else "".
+- brand: brand name if visible, else "".
+- serving_g: the serving size in GRAMS as printed (e.g. "Serving size 30g" -> 30). If serving is given only in another unit (mL, cups, pieces) with no gram weight, use 0.
+- cal, protein, carbs, fat: amounts PER SERVING exactly as printed. cal in kcal; macros in grams.
+- If a value is not legible, use 0. Do not invent values.`;
+  const url='https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+encodeURIComponent(key);
+  try{
+    const body={contents:[{parts:[{text:prompt},{inline_data:{mime_type:mime,data:b64}}]}],
+      generationConfig:{temperature:0,response_mime_type:'application/json'}};
+    const ctrl=new AbortController();const t=setTimeout(()=>ctrl.abort(),20000);
+    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:ctrl.signal});
+    clearTimeout(t);
+    if(!r.ok){toast(r.status===400||r.status===403?'Gemini key rejected — check Settings':'Label read failed ('+r.status+')');return;}
+    const data=await r.json();
+    const txt=data&&data.candidates&&data.candidates[0]&&data.candidates[0].content&&data.candidates[0].content.parts[0]&&data.candidates[0].content.parts[0].text||'';
+    let g;try{g=JSON.parse(txt);}catch(e){const m=txt.match(/\{[\s\S]*\}/);g=m?JSON.parse(m[0]):null;}
+    if(!g||(!(+g.cal)&&!(+g.protein)&&!(+g.carbs)&&!(+g.fat))){toast('Couldn’t read the label — try again or add manually');return;}
+    openLabelReview(g);
+  }catch(e){toast(e.name==='AbortError'?'Label read timed out':'Label read failed');}
+}
+function openLabelReview(g){
+  const serv=(+g.serving_g>0)?+g.serving_g:100;
+  document.getElementById('modal').innerHTML=`
+    <div class="grab"></div>
+    <h3>Check the label</h3>
+    <div class="msub">We read these from the photo — fix anything that's off, then Save. We'll remember it for this barcode.</div>
+    <div class="row"><label>Name</label><input id="lbName" type="text" value="${esc(g.name||'')}" placeholder="Product name" style="text-align:left"></div>
+    <div class="row"><label>Brand</label><input id="lbBrand" type="text" value="${esc(g.brand||'')}" placeholder="optional" style="text-align:left"></div>
+    <div class="row"><label>Serving g</label><input id="lbServ" type="number" inputmode="decimal" value="${serv}"></div>
+    <div class="row"><label>Calories</label><input id="lbCal" type="number" inputmode="decimal" value="${(+g.cal)||''}" placeholder="per serving"></div>
+    <div class="row"><label>Protein g</label><input id="lbP" type="number" inputmode="decimal" value="${(+g.protein)||''}" placeholder="per serving"></div>
+    <div class="row"><label>Carbs g</label><input id="lbC" type="number" inputmode="decimal" value="${(+g.carbs)||''}" placeholder="per serving"></div>
+    <div class="row"><label>Fat g</label><input id="lbF" type="number" inputmode="decimal" value="${(+g.fat)||''}" placeholder="per serving"></div>
+    <div class="m-actions"><button class="cancel" onclick="closeModal()">Cancel</button>
+      <button class="save" onclick="saveLabelFood()">Save</button></div>`;
+  showSheet('modalScrim','modal');
+}
+function saveLabelFood(){
+  const name=document.getElementById('lbName').value.trim();
+  const brand=document.getElementById('lbBrand').value.trim();
+  const serv=parseFloat(document.getElementById('lbServ').value)||100;
+  const cal=parseFloat(document.getElementById('lbCal').value)||0;
+  const p=parseFloat(document.getElementById('lbP').value)||0;
+  const c=parseFloat(document.getElementById('lbC').value)||0;
+  const f=parseFloat(document.getElementById('lbF').value)||0;
+  if(!name){toast('Enter a name');return;}
+  if(cal<=0){toast('Enter calories');return;}
+  const r=100/serv;
+  const food={name,brand,cal:Math.round(cal*r),p:+(p*r).toFixed(1),c:+(c*r).toFixed(1),f:+(f*r).toFixed(1),servingG:Math.round(serv),code:pendingLabelCode};
+  if(pendingLabelCode){barcache[pendingLabelCode]=food;LS.set('ct_barcache',barcache);}
+  if(!saved.some(s=>fkey(s)===fkey(food)))saved.unshift({name:food.name,brand:food.brand,cal:food.cal,p:food.p,c:food.c,f:food.f,servingG:food.servingG});
+  saveAll();
+  toast(pendingLabelCode?'Saved — future scans are instant':'Saved');
+  pendingLabelCode='';
+  openPortion({...food});
+}
+
 /* ===== Scanner ===== */
 let qr=null,lastScan=0;
 function openScanner(){
@@ -715,7 +807,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v2.4 · 2026-06-27';
+const APP_VERSION='v2.5 · 2026-06-27';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
