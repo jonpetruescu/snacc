@@ -382,10 +382,12 @@ function freqFoods(){
   }));
   return Object.keys(count).sort((a,b)=>count[b]-count[a]).map(k=>sample[k]);
 }
-function recipeCard(r){const t=recipeTotals(r),sv=r.servings||1,n=(r.items||[]).length;
+function recipeCard(r){const per=recipePer(r),n=(r.items||[]).length,sg=servG(r);
+  const sub=sg>0?`${per.cal} kcal / ${Math.round(sg)} g serving · ${n} ingredient${n===1?'':'s'}`
+                :`${per.cal} kcal · ${n} ingredient${n===1?'':'s'}`;
   return `<div class="fcard"><div class="fi" onclick="logRecipe('${r.id}')">
     <div class="fn">🍲 ${esc(r.name)}</div>
-    <div class="fs">${Math.round(t.cal/sv)} kcal / serving · ${n} ingredient${n===1?'':'s'}</div></div>
+    <div class="fs">${sub}</div></div>
     <button class="del" onclick="editRecipe('${r.id}')" title="Edit">✎</button></div>`;}
 function renderQuick(){
   const seen=new Set(),list=[];
@@ -585,13 +587,20 @@ function itemAmtLabel(it){return it.ps?(it.qty+' × '+(it.sl||'serving')):(it.qt
 function recipeTotals(rec){let t={cal:0,p:0,c:0,f:0};
   (rec.items||[]).forEach(it=>{const m=itemMacros(it);t.cal+=m.cal;t.p+=m.p;t.c+=m.c;t.f+=m.f;});
   return{cal:Math.round(t.cal),p:+t.p.toFixed(1),c:+t.c.toFixed(1),f:+t.f.toFixed(1)};}
-function newRecipe(){recipeDraft={id:'r'+Date.now()+Math.random().toString(36).slice(2,5),name:'',servings:1,totalG:null,items:[]};
+function recipeTotalG(rec){return Math.round((rec.items||[]).reduce((s,it)=>s+(it.ps?0:(+it.qty||0)),0));}
+function servG(rec){const tg=recipeTotalG(rec);
+  if(rec.servingG>0)return rec.servingG;
+  if(rec.servings>0&&tg>0)return tg/rec.servings;   // migrate old servings-count recipes
+  return tg||0;}                                     // unknown → whole recipe = 1 serving
+function recipePer(rec){const t=recipeTotals(rec),tg=recipeTotalG(rec),sg=servG(rec);
+  const r=(sg>0&&tg>0)?sg/tg:1;
+  return{cal:Math.round(t.cal*r),p:+(t.p*r).toFixed(1),c:+(t.c*r).toFixed(1),f:+(t.f*r).toFixed(1)};}
+function newRecipe(){recipeDraft={id:'r'+Date.now()+Math.random().toString(36).slice(2,5),name:'',servingG:null,items:[]};
   closeAdd();openRecipeBuilder();}
 function editRecipe(id){const r=recipes.find(x=>x.id===id);if(!r)return;
   recipeDraft=JSON.parse(JSON.stringify(r));closeAdd();openRecipeBuilder();}
 function openRecipeBuilder(){
-  const r=recipeDraft,t=recipeTotals(r),sv=r.servings||1;
-  const per={cal:Math.round(t.cal/sv),p:+(t.p/sv).toFixed(1),c:+(t.c/sv).toFixed(1),f:+(t.f/sv).toFixed(1)};
+  const r=recipeDraft,t=recipeTotals(r),per=recipePer(r);
   const rows=(r.items||[]).map((it,i)=>{const m=itemMacros(it);
     return `<div class="entry"><div class="info" onclick="editIngredient(${i})">
       <div class="en">${esc(it.name)}</div>
@@ -601,30 +610,33 @@ function openRecipeBuilder(){
   document.getElementById('modal').innerHTML=`
     <div class="grab"></div>
     <h3>${isExisting?'Edit recipe':'New recipe'}</h3>
-    <div class="msub">Add ingredients, set how many servings it makes. Total cooked weight is optional — add it to also log by grams.</div>
+    <div class="msub">List your ingredients and amounts, then set how many grams are in one serving.</div>
     <div class="row"><label>Name</label><input id="rcName" type="text" value="${esc(r.name||'')}" placeholder="e.g. Chili" style="text-align:left" oninput="recipeDraft.name=this.value"></div>
-    <div class="row"><label>Servings</label><input id="rcServ" type="number" inputmode="decimal" min="1" value="${sv}" oninput="recipeDraft.servings=parseFloat(this.value)||1;rcRefresh()"></div>
-    <div class="row"><label>Total g</label><input id="rcTotal" type="number" inputmode="decimal" value="${r.totalG||''}" placeholder="cooked weight (optional)" oninput="recipeDraft.totalG=parseFloat(this.value)||null"></div>
     <div class="sec-label" style="margin-top:6px">Ingredients</div>
     ${rows||'<div class="meal-empty">No ingredients yet — tap ＋ below</div>'}
     <button class="goal-edit" style="margin:8px auto;display:block" onclick="addIngredient()">＋ Add ingredient</button>
+    <div class="row"><label>Grams / serving</label><input id="rcServG" type="number" inputmode="decimal" value="${r.servingG||(r.servings>0&&recipeTotalG(r)>0?Math.round(recipeTotalG(r)/r.servings):'')}" placeholder="grams in one serving" oninput="recipeDraft.servingG=parseFloat(this.value)||null;rcRefresh()"></div>
     <div class="nutri-grid">
       <div class="nbox"><div class="nv" id="rcCal">${per.cal}</div><div class="nl">kcal/serv</div></div>
       <div class="nbox"><div class="nv" id="rcP">${per.p}</div><div class="nl">protein</div></div>
       <div class="nbox"><div class="nv" id="rcC">${per.c}</div><div class="nl">carbs</div></div>
       <div class="nbox"><div class="nv" id="rcF">${per.f}</div><div class="nl">fat</div></div></div>
-    <div class="gtot" id="rcTot">Whole recipe: ${t.cal} kcal · ${t.p}p ${t.c}c ${t.f}f</div>
+    <div class="gtot" id="rcTot">${rcSummary(r)}</div>
     <div class="m-actions">
       ${isExisting?`<button class="cancel" onclick="deleteRecipe('${r.id}')">Delete</button>`:`<button class="cancel" onclick="closeModal()">Cancel</button>`}
       <button class="save" onclick="saveRecipe()">Save recipe</button></div>`;
   showSheet('modalScrim','modal');
 }
-function rcRefresh(){const r=recipeDraft,t=recipeTotals(r),sv=r.servings||1;
-  document.getElementById('rcCal').textContent=Math.round(t.cal/sv);
-  document.getElementById('rcP').textContent=+(t.p/sv).toFixed(1);
-  document.getElementById('rcC').textContent=+(t.c/sv).toFixed(1);
-  document.getElementById('rcF').textContent=+(t.f/sv).toFixed(1);
-  document.getElementById('rcTot').textContent=`Whole recipe: ${t.cal} kcal · ${t.p}p ${t.c}c ${t.f}f`;}
+function rcSummary(r){const t=recipeTotals(r),tg=recipeTotalG(r),sg=servG(r);
+  let s=`Total ${tg} g · ${t.cal} kcal`;
+  if(sg>0&&tg>0)s+=` · makes ~${(tg/sg).toFixed(1).replace(/\.0$/,'')} servings`;
+  return s;}
+function rcRefresh(){const r=recipeDraft,per=recipePer(r);
+  document.getElementById('rcCal').textContent=per.cal;
+  document.getElementById('rcP').textContent=per.p;
+  document.getElementById('rcC').textContent=per.c;
+  document.getElementById('rcF').textContent=per.f;
+  document.getElementById('rcTot').textContent=rcSummary(r);}
 function addIngredient(){addTarget='recipe';editIngIdx=null;closeModal();
   document.getElementById('addMealLabel').textContent='recipe';
   document.getElementById('addSearch').value='';renderQuick();
@@ -638,28 +650,30 @@ function saveRecipe(){const r=recipeDraft;
   r.name=(document.getElementById('rcName').value||'').trim();
   if(!r.name){toast('Name your recipe');return;}
   if(!r.items.length){toast('Add at least one ingredient');return;}
-  r.servings=parseFloat(document.getElementById('rcServ').value)||1;
-  r.totalG=parseFloat(document.getElementById('rcTotal').value)||null;
+  r.servingG=parseFloat(document.getElementById('rcServG').value)||null;
+  delete r.servings;delete r.totalG;            // drop legacy fields
   const idx=recipes.findIndex(x=>x.id===r.id);
   if(idx>=0)recipes[idx]=r;else recipes.unshift(r);
   saveAll();addTarget='log';recipeDraft=null;closeModal();renderQuick();if(recipesPageOpen())renderRecipesPage();toast('Recipe saved');
 }
 function deleteRecipe(id){recipes=recipes.filter(x=>x.id!==id);saveAll();addTarget='log';recipeDraft=null;closeModal();renderQuick();if(recipesPageOpen())renderRecipesPage();toast('Recipe deleted');}
-function recipeFood(rec){const t=recipeTotals(rec),sv=rec.servings||1;
-  if(rec.totalG>0){const r=100/rec.totalG;
+function recipeFood(rec){const t=recipeTotals(rec),tg=recipeTotalG(rec),sg=servG(rec);
+  if(tg>0){const r=100/tg;                       // per-100g of total weight; serving = sg grams
     return{name:rec.name,brand:'',cal:Math.round(t.cal*r),p:+(t.p*r).toFixed(1),c:+(t.c*r).toFixed(1),f:+(t.f*r).toFixed(1),
-      servingG:Math.max(1,Math.round(rec.totalG/sv))};}
-  return{name:rec.name,brand:'',cal:Math.round(t.cal/sv),p:+(t.p/sv).toFixed(1),c:+(t.c/sv).toFixed(1),f:+(t.f/sv).toFixed(1),
-    servingG:100,sl:'serving',ps:true};}
+      servingG:Math.max(1,Math.round(sg||tg))};}
+  const per=recipePer(rec);                       // no gram basis → log whole recipe as 1 serving
+  return{name:rec.name,brand:'',cal:per.cal,p:per.p,c:per.c,f:per.f,servingG:100,sl:'serving',ps:true};}
 function logRecipe(id){const r=recipes.find(x=>x.id===id);if(!r)return;
   addTarget='log';openPortion(recipeFood(r));}
 function openRecipes(){closeAdd();renderRecipesPage();showSheet('recipesScrim','recipesSheet');}
 function closeRecipes(){hideSheet('recipesScrim','recipesSheet');}
 function recipesPageOpen(){return document.getElementById('recipesSheet').classList.contains('show');}
-function recipeMgmtCard(r){const t=recipeTotals(r),sv=r.servings||1,n=(r.items||[]).length;
+function recipeMgmtCard(r){const per=recipePer(r),n=(r.items||[]).length,sg=servG(r);
+  const sub=sg>0?`${per.cal} kcal / ${Math.round(sg)} g serving · ${n} ingredient${n===1?'':'s'}`
+                :`${per.cal} kcal · ${n} ingredient${n===1?'':'s'} · set serving size`;
   return `<div class="fcard" onclick="editRecipe('${r.id}')"><div class="fi">
     <div class="fn">🍲 ${esc(r.name)}</div>
-    <div class="fs">${Math.round(t.cal/sv)} kcal / serving · ${n} ingredient${n===1?'':'s'} · makes ${sv}</div></div>
+    <div class="fs">${sub}</div></div>
     <div class="fp">›</div></div>`;}
 function renderRecipesPage(){const box=document.getElementById('recipesList');
   box.innerHTML=recipes.length?recipes.map(recipeMgmtCard).join('')
@@ -962,7 +976,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v3.0 · 2026-06-28';
+const APP_VERSION='v3.1 · 2026-06-28';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
