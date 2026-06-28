@@ -369,11 +369,14 @@ function renderQuick(){
     ? '<div class="sec-label">Saved & frequent</div>'+reg.quick.map((f,i)=>fcard(f,i,'quick')).join('')
     : '<div class="empty">Search a food, scan a barcode,<br>or add a custom food.</div>';
 }
-function fcard(f,i,which){const m=calcMacros(f,100);
-  const basis=f.ps?(esc(f.sl||'serving')):'100g';
+function fcard(f,i,which){
+  let calDisplay,basis;
+  if(f.ps){calDisplay=f.cal;basis=esc(f.sl||'serving');}
+  else if(f.servingG){calDisplay=calcMacros(f,f.servingG).cal;basis='serving';}
+  else{calDisplay=calcMacros(f,100).cal;basis='100g';}
   return `<div class="fcard" onclick="pick('${which}',${i})"><div class="fi">
     <div class="fn">${esc(f.name)}</div>
-    <div class="fs">${f.brand?esc(f.brand)+' · ':''}${m.cal} kcal / ${basis}</div></div>
+    <div class="fs">${f.brand?esc(f.brand)+' · ':''}${calDisplay} kcal / ${basis}</div></div>
     <div class="fp">+</div></div>`;}
 function pick(which,i){openPortion({...reg[which][i]});}
 
@@ -828,7 +831,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v2.7 · 2026-06-27';
+const APP_VERSION='v2.8 · 2026-06-28';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
