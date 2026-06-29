@@ -108,8 +108,13 @@
   .meal-head .madd::before{width:15px;height:3px;transform:translate(-50%,-50%)}
   .meal-head .madd::after{width:3px;height:15px;transform:translate(-50%,-50%)}
   .entries{padding:0 8px 8px}
-  .entry{display:flex;align-items:center;gap:12px;padding:11px 8px;border-top:1px solid var(--line)}
+  .entry{display:flex;align-items:center;gap:7px;padding:11px 8px;border-top:1px solid var(--line)}
   .entry .info{flex:1;min-width:0}
+  .qctl{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+  .qstep{width:27px;height:27px;border-radius:8px;background:var(--card2);color:var(--text);font-size:18px;
+    display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .qdup{width:26px;height:26px;border-radius:8px;background:transparent;color:#5d6475;font-size:14px;
+    display:flex;align-items:center;justify-content:center;flex:0 0 auto}
   .entry .en{font-size:14.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .entry .es{font-size:12px;color:var(--muted);margin-top:2px}
   .entry .ec{font-size:14.5px;font-weight:700;white-space:nowrap}
@@ -455,7 +460,12 @@ function renderDiary(){
         <div class="entry"><div class="info" onclick="openEditEntry('${e.id}')">
           <div class="en">${esc(e.name)}</div>
           <div class="es">${entryAmtLabel(e)}${e.p}p ${e.c}c ${e.f}f</div></div>
-          <div class="ec">${e.cal}<small>kcal</small></div>
+          <div class="qctl">
+            ${e.quick?'':`<button class="qstep" onclick="quickAdj('${e.id}',-1)">−</button>`}
+            <div class="ec">${e.cal}<small>kcal</small></div>
+            ${e.quick?'':`<button class="qstep" onclick="quickAdj('${e.id}',1)">+</button>`}
+          </div>
+          <button class="qdup" onclick="dupEntry('${e.id}')" title="Duplicate">⧉</button>
           <button class="del" onclick="removeEntry('${e.id}')">✕</button></div>`).join('')+'</div>';
     } else {
       const src=prevDayWith(k=>(logs[k]||[]).some(e=>mealOf(e)===meal));
@@ -466,6 +476,14 @@ function renderDiary(){
   document.getElementById('diary').innerHTML=html;
 }
 function removeEntry(id){logs[curDate]=(logs[curDate]||[]).filter(e=>e.id!==id);saveAll();refresh();toast('Removed');}
+function stepFor(a){return a>=300?50:a>=150?25:a>=60?10:a>=20?5:1;}
+function quickAdj(id,dir){const e=(logs[curDate]||[]).find(x=>x.id===id);if(!e||e.quick)return;
+  const b=entryBase(e),step=b.ps?(b.g||100):stepFor(e.amount||0);
+  let na=(e.amount||0)+dir*step;if(na<1)na=1;
+  const m=calcMacros(b,na);e.amount=na;e.cal=m.cal;e.p=m.p;e.c=m.c;e.f=m.f;e.b=b;
+  saveAll();refresh();}
+function dupEntry(id){const a=logs[curDate]||[],e=a.find(x=>x.id===id);if(!e)return;
+  a.splice(a.indexOf(e)+1,0,{...e,id:newId()});saveAll();refresh();toast('Duplicated');}
 
 /* ===== Add sheet ===== */
 function updateAddDone(){const b=document.getElementById('addDone');if(b)b.textContent=addedCount>0?('Done · '+addedCount):'Done';}
@@ -1335,7 +1353,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v4.7 · 2026-06-28';
+const APP_VERSION='v4.8 · 2026-06-28';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
