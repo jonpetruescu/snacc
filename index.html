@@ -18,6 +18,7 @@
     --text:#fbf3ec; --muted:#b39d8b; --accent:#ff8a3d; --accent2:#ffb02e;
     --accent-d:#e0721f; --p:#ff6b6b; --c:#ffc14d; --f:#c98bff;
     --teal:#2dd4bf; --blue:#5b9dff; --amber:#ffb02e; --warn:#ff6b6b;
+    --over:#ff3b30;  /* over-goal: distinct from protein coral (--p) */
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);
@@ -83,7 +84,7 @@
   .macro .mtop .mv{font-weight:600}
   .macro .bar{height:7px;background:var(--card2);border-radius:6px;overflow:hidden}
   .macro .fill{height:100%;border-radius:6px;width:0%;transition:width .45s cubic-bezier(.34,.1,.2,1),background .3s}
-  .macro .mtop .mv.over{color:var(--warn)}
+  .macro .mtop .mv.over{color:var(--over)}
   .goal-edit{font-size:12px;color:var(--accent);background:none;padding:2px 0;align-self:flex-start;font-weight:600}
   #calRing{transition:stroke-dashoffset .65s cubic-bezier(.34,.1,.2,1),stroke .3s}
   /* gentle depth on cards for hierarchy */
@@ -380,7 +381,7 @@ function renderDashboard(){
   const C=351.9, pct=Math.min(t.cal/(goals.cal||1),1);
   const ring=document.getElementById('calRing');
   ring.style.strokeDashoffset=C*(1-pct);
-  ring.style.stroke=left>=0?'url(#rg)':'var(--warn)';
+  ring.style.stroke=left>=0?'url(#rg)':'var(--over)';
   setMacro(t.p,goals.p,'pTxt','pFill');
   setMacro(t.c,goals.c,'cTxt','cFill');
   setMacro(t.f,goals.f,'fTxt','fFill');
@@ -389,7 +390,7 @@ function setMacro(v,goal,tid,fid){const tx=document.getElementById(tid),fl=docum
   tx.textContent=`${v} / ${goal}g`;
   const over=goal>0&&v>goal;
   fl.style.width=Math.min(v/(goal||1)*100,100)+'%';
-  fl.style.background=over?'var(--warn)':MFILL[fid];
+  fl.style.background=over?'var(--over)':MFILL[fid];
   tx.classList.toggle('over',over);}
 
 /* ===== Date nav ===== */
@@ -1284,7 +1285,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v4.4 · 2026-06-28';
+const APP_VERSION='v4.5 · 2026-06-28';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
