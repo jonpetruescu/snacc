@@ -139,6 +139,22 @@
   .fcard .fp::before{width:13px;height:2.6px;transform:translate(-50%,-50%)}
   .fcard .fp::after{width:2.6px;height:13px;transform:translate(-50%,-50%)}
 
+  /* Insights */
+  .ins-streak{display:flex;align-items:center;gap:12px;background:var(--card);border-radius:16px;padding:14px 16px;margin-bottom:12px}
+  .ins-streak .big{font-size:30px;font-weight:900;line-height:1}
+  .ins-streak .lab{font-size:13px;color:var(--muted);font-weight:600}
+  .stat-row{display:flex;gap:9px;margin-bottom:12px}
+  .stat{flex:1;background:var(--card);border-radius:14px;padding:12px 10px;text-align:center}
+  .stat .sv{font-size:19px;font-weight:800;line-height:1.1}
+  .stat .sl{font-size:11px;color:var(--muted);margin-top:4px;text-transform:uppercase;letter-spacing:.4px}
+  .chart-card{background:var(--card);border-radius:16px;padding:14px 14px 10px;margin-bottom:12px}
+  .chart-card .ct{font-size:13px;font-weight:700;margin-bottom:10px}
+  .chart-card .ct span{color:var(--muted);font-weight:500;font-size:12px}
+  .chart-card svg{width:100%;height:auto;display:block}
+  .seg-toggle{display:inline-flex;background:var(--card2);border-radius:10px;padding:3px;gap:2px}
+  .seg-toggle button{padding:5px 12px;border-radius:8px;font-size:13px;font-weight:600;color:var(--muted)}
+  .seg-toggle button.on{background:var(--accent);color:#2a1400}
+
   /* Portion + form modal */
   .modal{position:fixed;left:0;right:0;bottom:0;max-width:520px;margin:0 auto;z-index:53;
     background:var(--card);border-radius:24px 24px 0 0;transform:translateY(100%);
@@ -184,6 +200,7 @@
   <div class="date-row">
     <div class="brand"><div class="logo">S</div><h1>Snacc</h1></div>
     <div class="hdr-actions">
+      <button class="hicon" onclick="openInsights()" title="Insights">📊</button>
       <button class="hicon" onclick="openRecipes()" title="Recipes">🍲</button>
       <div class="date-nav">
         <button onclick="changeDay(-1)">‹</button>
@@ -237,6 +254,14 @@
   <div class="add-results" id="addResults"></div>
 </div>
 
+<!-- Insights page -->
+<div class="scrim" id="insightsScrim" onclick="closeInsights()"></div>
+<div class="sheet" id="insightsSheet">
+  <div class="grab"></div>
+  <div class="add-top"><div class="add-title">Insights</div></div>
+  <div class="add-results" id="insightsBody"></div>
+</div>
+
 <!-- Recipes page -->
 <div class="scrim" id="recipesScrim" onclick="closeRecipes()"></div>
 <div class="sheet" id="recipesSheet">
@@ -283,6 +308,8 @@ let pendingFood=null, selectedMeal='Snacks', addMeal='Snacks', editingId=null;
 let barcache=LS.get('ct_barcache',{});
 let recipes=LS.get('ct_recipes',[]);
 let recipeDraft=null, addTarget='log', editIngIdx=null;
+let weights=LS.get('ct_weights',{});   // dateKey -> kg (canonical)
+let wUnit=LS.get('ct_wunit','lb');     // display unit: 'lb' | 'kg'
 const MEALS=['Breakfast','Lunch','Dinner','Snacks'];
 const MICON={Breakfast:'🍳',Lunch:'🥗',Dinner:'🍝',Snacks:'🍎'};
 const reg={results:[],quick:[]};
@@ -294,7 +321,7 @@ fetch('foods.json').then(r=>r.json()).then(d=>{
 
 function dateKey(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function todayKey(){return dateKey(new Date());}
-function saveAll(){LS.set('ct_goals',goals);LS.set('ct_saved',saved);LS.set('ct_logs',logs);LS.set('ct_recipes',recipes);}
+function saveAll(){LS.set('ct_goals',goals);LS.set('ct_saved',saved);LS.set('ct_logs',logs);LS.set('ct_recipes',recipes);LS.set('ct_weights',weights);LS.set('ct_wunit',wUnit);}
 function calcMacros(f,g){const r=g/100;return{cal:Math.round(f.cal*r),p:+(f.p*r).toFixed(1),c:+(f.c*r).toFixed(1),f:+(f.f*r).toFixed(1)};}
 function gG(cal,pct,k){return Math.round((+cal||0)*(+pct||0)/100/k);}  // grams from % of calories (k=kcal/g)
 function normalizeGoals(){ if(goals.pPct==null){const cal=goals.cal||2000;
@@ -694,6 +721,83 @@ function renderRecipesPage(){const box=document.getElementById('recipesList');
   box.innerHTML=recipes.length?recipes.map(recipeMgmtCard).join('')
     :'<div class="empty">No recipes yet.<br>Tap ＋ New recipe to build one.</div>';}
 
+/* ===== Insights ===== */
+const LB=2.2046226;
+function dispW(kg){return wUnit==='kg'?kg:kg*LB;}
+function toKg(v){return wUnit==='kg'?v:v/LB;}
+function lastDayKeys(n){const out=[],d=new Date();
+  for(let i=n-1;i>=0;i--){const x=new Date(d);x.setDate(d.getDate()-i);out.push(dateKey(x));}return out;}
+function loggedStreak(){let s=0;const d=new Date();
+  if(!(logs[dateKey(d)]||[]).length)d.setDate(d.getDate()-1);   // don't punish "not logged yet today"
+  while((logs[dateKey(d)]||[]).length){s++;d.setDate(d.getDate()-1);}return s;}
+function periodStats(n){const ks=lastDayKeys(n);let days=0,sum={cal:0,p:0,c:0,f:0};
+  ks.forEach(k=>{if((logs[k]||[]).length){days++;const t=totalsFor(k);sum.cal+=t.cal;sum.p+=t.p;sum.c+=t.c;sum.f+=t.f;}});
+  const d=days||1;return{days,n,cal:Math.round(sum.cal/d),p:Math.round(sum.p/d),c:Math.round(sum.c/d),f:Math.round(sum.f/d)};}
+function calorieBarSVG(n){
+  const ks=lastDayKeys(n),vals=ks.map(k=>totalsFor(k).cal),goal=goals.cal||2000;
+  const maxV=Math.max(goal,...vals,1)*1.12,W=340,H=140,pb=16,pt=8,pl=4,pr=4;
+  const cw=(W-pl-pr)/n,bw=Math.max(3,cw*0.62),y=v=>pt+(H-pt-pb)*(1-v/maxV);
+  let bars='';ks.forEach((k,i)=>{const v=vals[i],x=pl+cw*i+(cw-bw)/2,yy=y(v),h=(H-pb)-yy;
+    bars+=`<rect x="${x.toFixed(1)}" y="${yy.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0,h).toFixed(1)}" rx="2" fill="${v>goal?'var(--warn)':'url(#barg)'}"/>`;});
+  const gy=y(goal);
+  return `<svg viewBox="0 0 ${W} ${H}"><defs><linearGradient id="barg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff9f43"/><stop offset="1" stop-color="#ffce54"/></linearGradient></defs>`+
+    `<line x1="${pl}" y1="${gy.toFixed(1)}" x2="${W-pr}" y2="${gy.toFixed(1)}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="4 4" opacity=".7"/>${bars}</svg>`;
+}
+function weightLineSVG(){
+  const es=Object.keys(weights).sort().map(k=>[k,weights[k]]);
+  if(es.length<2)return '<div class="meal-empty">Log your weight on a couple of days to see a trend.</div>';
+  const pts=es.slice(-16),vals=pts.map(p=>p[1]);
+  let mn=Math.min(...vals),mx=Math.max(...vals);
+  if(goals.wGoal){mn=Math.min(mn,goals.wGoal);mx=Math.max(mx,goals.wGoal);}
+  const pad=(mx-mn)*0.18||1;mn-=pad;mx+=pad;
+  const W=340,H=130,pl=6,pr=6,pt=10,pb=12;
+  const x=i=>pl+(W-pl-pr)*(pts.length>1?i/(pts.length-1):0);
+  const y=v=>pt+(H-pt-pb)*(1-(v-mn)/((mx-mn)||1));
+  let d='';pts.forEach((p,i)=>{d+=(i?'L':'M')+x(i).toFixed(1)+' '+y(p[1]).toFixed(1)+' ';});
+  const dots=pts.map((p,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(p[1]).toFixed(1)}" r="2.5" fill="var(--accent2)"/>`).join('');
+  let gl='';if(goals.wGoal){const gy=y(goals.wGoal);gl=`<line x1="${pl}" y1="${gy.toFixed(1)}" x2="${W-pr}" y2="${gy.toFixed(1)}" stroke="var(--teal)" stroke-width="1" stroke-dasharray="4 4"/>`;}
+  return `<svg viewBox="0 0 ${W} ${H}"><defs><linearGradient id="wln" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff9f43"/><stop offset="1" stop-color="#ffb02e"/></linearGradient></defs>`+
+    `${gl}<path d="${d}" fill="none" stroke="url(#wln)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>${dots}</svg>`;
+}
+function openInsights(){closeAdd();renderInsights();showSheet('insightsScrim','insightsSheet');}
+function closeInsights(){hideSheet('insightsScrim','insightsSheet');}
+function insightsOpen(){return document.getElementById('insightsSheet').classList.contains('show');}
+function setWUnit(u){wUnit=u;saveAll();renderInsights();}
+function saveWeight(){const v=parseFloat(document.getElementById('wInput').value);
+  if(!v||v<=0){toast('Enter a weight');return;}
+  weights[todayKey()]=+toKg(v).toFixed(3);saveAll();renderInsights();toast('Weight logged');}
+function setWGoal(){const v=parseFloat(document.getElementById('wGoalInput').value);
+  goals.wGoal=v>0?+toKg(v).toFixed(3):null;saveAll();renderInsights();}
+function renderInsights(){
+  const st=periodStats(7),streak=loggedStreak();
+  const wk=Object.keys(weights).sort();
+  const curKg=wk.length?weights[wk[wk.length-1]]:null,firstKg=wk.length?weights[wk[0]]:null;
+  const chg=(curKg!=null&&firstKg!=null)?dispW(curKg)-dispW(firstKg):null;
+  const todW=weights[todayKey()];
+  const u=wUnit;
+  const html=`
+    <div class="ins-streak"><div class="big">🔥 ${streak}</div>
+      <div><div style="font-weight:700">day${streak===1?'':'s'} logged in a row</div>
+      <div class="lab">${streak?'Keep it going!':'Log something today to start a streak.'}</div></div></div>
+    <div class="sec-label">Last 7 days · avg/day${st.days<7?` (${st.days} day${st.days===1?'':'s'} logged)`:''}</div>
+    <div class="stat-row">
+      <div class="stat"><div class="sv">${st.cal}</div><div class="sl">kcal</div></div>
+      <div class="stat"><div class="sv">${st.p}g</div><div class="sl">protein</div></div>
+      <div class="stat"><div class="sv">${st.c}g</div><div class="sl">carbs</div></div>
+      <div class="stat"><div class="sv">${st.f}g</div><div class="sl">fat</div></div></div>
+    <div class="chart-card"><div class="ct">Calories · last 14 days <span>(dashed = goal ${goals.cal||2000})</span></div>${calorieBarSVG(14)}</div>
+    <div class="chart-card">
+      <div class="ct" style="display:flex;justify-content:space-between;align-items:center">
+        <span>Weight${curKg!=null?` · ${dispW(curKg).toFixed(1)} ${u}`:''}${chg!=null&&Math.abs(chg)>=0.1?` <span>(${chg>0?'+':''}${chg.toFixed(1)} ${u})</span>`:''}</span>
+        <span class="seg-toggle"><button class="${u==='lb'?'on':''}" onclick="setWUnit('lb')">lb</button><button class="${u==='kg'?'on':''}" onclick="setWUnit('kg')">kg</button></span>
+      </div>
+      ${weightLineSVG()}
+      <div class="row" style="margin-top:10px"><label>Today (${u})</label><input id="wInput" type="number" inputmode="decimal" value="${todW!=null?dispW(todW).toFixed(1):''}" placeholder="weight"><button class="save" style="flex:0 0 auto;padding:12px 16px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#2a1400;font-weight:700" onclick="saveWeight()">Log</button></div>
+      <div class="row" style="margin-top:8px"><label>Goal (${u})</label><input id="wGoalInput" type="number" inputmode="decimal" value="${goals.wGoal?dispW(goals.wGoal).toFixed(1):''}" placeholder="optional" onchange="setWGoal()"></div>
+    </div>`;
+  document.getElementById('insightsBody').innerHTML=html;
+}
+
 /* ===== Goals ===== */
 function editGoals(){
   document.getElementById('modal').innerHTML=`
@@ -763,7 +867,7 @@ function renderVer(){
 }
 async function backupNow(silent){
   const cfg=LS.get('ct_gh',null);if(!cfg||!cfg.token||!cfg.owner||!cfg.repo)return;
-  const data=JSON.stringify({goals,saved,logs,barcache,recipes});
+  const data=JSON.stringify({goals,saved,logs,barcache,recipes,weights,wUnit});
   if(silent&&data===LS.get('ct_lastpayload',''))return;        // nothing changed → skip
   const url=`https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/snacc-backup.json`;
   const headers={Authorization:'Bearer '+cfg.token,Accept:'application/vnd.github+json'};
@@ -789,6 +893,8 @@ async function restoreNow(){
     const data=JSON.parse(b64d((await g.json()).content));
     if(data.goals)goals=data.goals;if(data.saved)saved=data.saved;if(data.logs)logs=data.logs;
     if(data.recipes)recipes=data.recipes;
+    if(data.weights)weights=data.weights;
+    if(data.wUnit)wUnit=data.wUnit;
     if(data.barcache){barcache=data.barcache;LS.set('ct_barcache',barcache);}
     saveAll();normalizeGoals();
     // Save creds for future auto-backups, and mark this exact state as already-backed-up
@@ -1021,7 +1127,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v3.4 · 2026-06-28';
+const APP_VERSION='v3.5 · 2026-06-28';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
