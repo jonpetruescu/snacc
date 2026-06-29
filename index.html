@@ -157,6 +157,8 @@
     background:#2a1400;border-radius:2px}
   .fcard .fp::before{width:13px;height:2.6px;transform:translate(-50%,-50%)}
   .fcard .fp::after{width:2.6px;height:13px;transform:translate(-50%,-50%)}
+  .fcard .fedit{flex:0 0 auto;width:40px;height:40px;border-radius:12px;background:var(--card2);
+    color:var(--accent);font-size:19px;display:flex;align-items:center;justify-content:center}
 
   /* Insights */
   .ins-streak{display:flex;align-items:center;gap:12px;background:var(--card);border-radius:16px;padding:14px 16px;margin-bottom:12px}
@@ -462,7 +464,7 @@ function recipeCard(r){const per=recipePer(r),n=(r.items||[]).length,sg=servG(r)
   return `<div class="fcard"><div class="fi" onclick="logRecipe('${r.id}')">
     <div class="fn">🍲 ${esc(r.name)}</div>
     <div class="fs">${sub}</div></div>
-    <button class="del" onclick="editRecipe('${r.id}')" title="Edit">✎</button></div>`;}
+    <button class="fedit" onclick="editRecipe('${r.id}')" title="Edit">✎</button></div>`;}
 function renderQuick(){
   const seen=new Set(),list=[];
   saved.concat(freqFoods()).forEach(f=>{const k=fkey(f);if(!seen.has(k)){seen.add(k);list.push(f);}});
@@ -1216,7 +1218,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v4.0 · 2026-06-28';
+const APP_VERSION='v4.1 · 2026-06-28';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
