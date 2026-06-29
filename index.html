@@ -142,9 +142,10 @@
   /* Add sheet */
   #addSheet{height:88vh}
   .add-top{padding:6px 16px 12px}
-  .add-title{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;
-    text-align:center;margin-bottom:12px;font-weight:600}
+  .add-title-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .add-title{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
   .add-title b{color:var(--accent)}
+  .adone{color:var(--accent);font-weight:700;font-size:15px;padding:4px 8px}
   .search-row{display:flex;gap:9px}
   .search-row input{flex:1;background:var(--card);border:1px solid var(--line);border-radius:16px;
     padding:13px 14px;color:var(--text);font-size:16px;outline:none}
@@ -302,7 +303,10 @@
 <div class="sheet" id="addSheet">
   <div class="grab"></div>
   <div class="add-top">
-    <div class="add-title">Add to <b id="addMealLabel">Snacks</b></div>
+    <div class="add-title-row">
+      <div class="add-title">Add to <b id="addMealLabel">Snacks</b></div>
+      <button class="adone" id="addDone" onclick="closeAdd()">Done</button>
+    </div>
     <div class="search-row">
       <input id="addSearch" type="search" placeholder="Search a food…" oninput="onSearchInput()" autocomplete="off">
       <button class="sq-btn scan" onclick="openScanner()" title="Scan barcode">▣</button>
@@ -350,7 +354,7 @@ let curDate=todayKey();
 let pendingFood=null, selectedMeal='Snacks', addMeal='Snacks', editingId=null;
 let barcache=LS.get('ct_barcache',{});
 let recipes=LS.get('ct_recipes',[]);
-let recipeDraft=null, addTarget='log', editIngIdx=null, addView='main', pUnit='g';
+let recipeDraft=null, addTarget='log', editIngIdx=null, addView='main', pUnit='g', addedCount=0;
 let lastPortion=LS.get('ct_lastportion',{});   // fkey -> {u:unit, a:amount}
 let weights=LS.get('ct_weights',{});   // dateKey -> kg (canonical)
 let wUnit=LS.get('ct_wunit','lb');     // display unit: 'lb' | 'kg'
@@ -464,8 +468,9 @@ function renderDiary(){
 function removeEntry(id){logs[curDate]=(logs[curDate]||[]).filter(e=>e.id!==id);saveAll();refresh();toast('Removed');}
 
 /* ===== Add sheet ===== */
+function updateAddDone(){const b=document.getElementById('addDone');if(b)b.textContent=addedCount>0?('Done · '+addedCount):'Done';}
 function openAdd(meal){
-  addTarget='log';editIngIdx=null;addView='main';
+  addTarget='log';editIngIdx=null;addView='main';addedCount=0;updateAddDone();
   document.getElementById('recipesAddBtn').style.display='';
   addMeal=meal||defaultMeal();
   document.getElementById('addMealLabel').textContent=addMeal;
@@ -663,7 +668,11 @@ function confirmAdd(){
   const entry={id:Date.now()+''+Math.random().toString(36).slice(2,6),name:pendingFood.name,brand:pendingFood.brand||'',
     meal:selectedMeal,amount:Math.round(g),cal:m.cal,p:m.p,c:m.c,f:m.f,b};
   (logs[curDate]=logs[curDate]||[]).push(entry);saveAll();
-  closeModal();closeAdd();refresh();toast('Added to '+selectedMeal);
+  // Multi-add: keep the add sheet open so several foods can be logged in a row.
+  addedCount++;closeModal();refresh();
+  addView='main';document.getElementById('addSearch').value='';renderQuick();updateAddDone();
+  toast('Added to '+selectedMeal+' · '+addedCount);
+  if(!document.getElementById('addSheet').classList.contains('show'))closeAdd();
 }
 function toggleSave(){const f=pendingFood,i=saved.findIndex(s=>fkey(s)===fkey(f)),btn=document.getElementById('starBtn');
   if(i>=0){saved.splice(i,1);btn.classList.remove('on');toast('Unsaved');}
@@ -1326,7 +1335,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v4.6 · 2026-06-28';
+const APP_VERSION='v4.7 · 2026-06-28';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
