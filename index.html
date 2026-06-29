@@ -159,6 +159,11 @@
   .fcard .fp::after{width:2.6px;height:13px;transform:translate(-50%,-50%)}
   .fcard .fedit{flex:0 0 auto;width:40px;height:40px;border-radius:12px;background:var(--card2);
     color:var(--accent);font-size:19px;display:flex;align-items:center;justify-content:center}
+  .fstar{color:var(--amber);font-size:12px;margin-right:5px;vertical-align:1px}
+  .addback{display:inline-flex;align-items:center;gap:4px;color:var(--accent);font-weight:700;
+    font-size:15px;padding:6px 2px;margin:2px 0 2px}
+  @keyframes slideInR{from{transform:translateX(28px);opacity:0}to{transform:none;opacity:1}}
+  @keyframes slideInL{from{transform:translateX(-28px);opacity:0}to{transform:none;opacity:1}}
 
   /* Insights */
   .ins-streak{display:flex;align-items:center;gap:12px;background:var(--card);border-radius:16px;padding:14px 16px;margin-bottom:12px}
@@ -287,6 +292,7 @@
     <div class="add-actions">
       <button onclick="openCustomForm()">＋ Custom</button>
       <button onclick="openQuickAdd()">⚡ Quick cals</button>
+      <button id="recipesAddBtn" onclick="showRecipesInAdd()">🍲 Recipes ›</button>
     </div>
   </div>
   <div class="add-results" id="addResults"></div>
@@ -326,7 +332,7 @@ let curDate=todayKey();
 let pendingFood=null, selectedMeal='Snacks', addMeal='Snacks', editingId=null;
 let barcache=LS.get('ct_barcache',{});
 let recipes=LS.get('ct_recipes',[]);
-let recipeDraft=null, addTarget='log', editIngIdx=null;
+let recipeDraft=null, addTarget='log', editIngIdx=null, addView='main';
 let weights=LS.get('ct_weights',{});   // dateKey -> kg (canonical)
 let wUnit=LS.get('ct_wunit','lb');     // display unit: 'lb' | 'kg'
 const MEALS=['Breakfast','Lunch','Dinner','Snacks'];
@@ -426,7 +432,8 @@ function removeEntry(id){logs[curDate]=(logs[curDate]||[]).filter(e=>e.id!==id);
 
 /* ===== Add sheet ===== */
 function openAdd(meal){
-  addTarget='log';editIngIdx=null;
+  addTarget='log';editIngIdx=null;addView='main';
+  document.getElementById('recipesAddBtn').style.display='';
   addMeal=meal||defaultMeal();
   document.getElementById('addMealLabel').textContent=addMeal;
   document.getElementById('addSearch').value='';
@@ -465,16 +472,25 @@ function recipeCard(r){const per=recipePer(r),n=(r.items||[]).length,sg=servG(r)
     <div class="fn">🍲 ${esc(r.name)}</div>
     <div class="fs">${sub}</div></div>
     <button class="fedit" onclick="editRecipe('${r.id}')" title="Edit">✎</button></div>`;}
+function slideAdd(dir){const b=document.getElementById('addResults');
+  b.style.animation='none';void b.offsetWidth;b.style.animation='slideIn'+dir+' .22s ease';}
+function showRecipesInAdd(){addView='recipes';renderQuick();slideAdd('R');}
+function backToAddMain(){addView='main';renderQuick();slideAdd('L');}
 function renderQuick(){
-  const seen=new Set(),list=[];
-  saved.concat(freqFoods()).forEach(f=>{const k=fkey(f);if(!seen.has(k)){seen.add(k);list.push(f);}});
-  reg.quick=list.slice(0,25);
   const box=document.getElementById('addResults');
+  if(addView==='recipes'&&addTarget!=='recipe'){
+    const list=recipes.length?recipes.map(recipeCard).join('')
+      :'<div class="empty">No recipes yet.<br>Make one on the Recipes page.</div>';
+    box.innerHTML=`<button class="addback" onclick="backToAddMain()">‹ Back</button>`+
+      `<div class="sec-label">Your recipes</div>${list}`;
+    return;
+  }
+  reg.saved=saved.slice(0,40);
+  const savedKeys=new Set(saved.map(fkey));
+  reg.freq=freqFoods().filter(f=>!savedKeys.has(fkey(f))).slice(0,25);
   let html='';
-  if(addTarget!=='recipe'&&recipes.length)
-    html+='<div class="sec-label">Recipes</div>'+recipes.map(recipeCard).join('');
-  if(reg.quick.length)
-    html+='<div class="sec-label">Saved & frequent</div>'+reg.quick.map((f,i)=>fcard(f,i,'quick')).join('');
+  if(reg.saved.length) html+='<div class="sec-label">Saved</div>'+reg.saved.map((f,i)=>fcard(f,i,'saved')).join('');
+  if(reg.freq.length)  html+='<div class="sec-label">Frequent</div>'+reg.freq.map((f,i)=>fcard(f,i,'freq')).join('');
   box.innerHTML=html||'<div class="empty">Search a food, scan a barcode,<br>or add a custom food.</div>';
 }
 function fcard(f,i,which){
@@ -482,8 +498,9 @@ function fcard(f,i,which){
   if(f.ps){calDisplay=f.cal;basis=esc(f.sl||'serving');}
   else if(f.servingG){calDisplay=calcMacros(f,f.servingG).cal;basis='serving';}
   else{calDisplay=calcMacros(f,100).cal;basis='100g';}
+  const star=which==='saved'?'<span class="fstar">★</span>':'';
   return `<div class="fcard" onclick="pick('${which}',${i})"><div class="fi">
-    <div class="fn">${esc(f.name)}</div>
+    <div class="fn">${star}${esc(f.name)}</div>
     <div class="fs">${f.brand?esc(f.brand)+' · ':''}${calDisplay} kcal / ${basis}</div></div>
     <div class="fp">+</div></div>`;}
 function pick(which,i){openPortion({...reg[which][i]});}
@@ -497,6 +514,7 @@ function localSearch(q){const t=q.toLowerCase();
   return hits.slice(0,40);}
 function onSearchInput(){
   const q=document.getElementById('addSearch').value.trim();
+  if(addView==='recipes')addView='main';   // typing exits the recipes sub-view
   if(!q){clearTimeout(searchTimer);renderQuick();return;}
   runSearch(q);
 }
@@ -713,7 +731,8 @@ function rcRefresh(){const r=recipeDraft,per=recipePer(r);
   document.getElementById('rcC').textContent=per.c;
   document.getElementById('rcF').textContent=per.f;
   document.getElementById('rcTot').textContent=rcSummary(r);}
-function addIngredient(){addTarget='recipe';editIngIdx=null;closeModal();
+function addIngredient(){addTarget='recipe';editIngIdx=null;addView='main';closeModal();
+  document.getElementById('recipesAddBtn').style.display='none';   // recipes can't be ingredients
   document.getElementById('addMealLabel').textContent='recipe';
   document.getElementById('addSearch').value='';renderQuick();
   showSheet('addScrim','addSheet');
@@ -1218,7 +1237,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v4.1 · 2026-06-28';
+const APP_VERSION='v4.2 · 2026-06-28';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
