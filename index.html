@@ -20,12 +20,28 @@
     --teal:#2dd4bf; --blue:#5b9dff; --amber:#ffb02e; --warn:#ff6b6b;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
+  html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);
     font-family:ui-rounded,"SF Pro Rounded",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     -webkit-font-smoothing:antialiased;overscroll-behavior:none}
-  body{max-width:520px;margin:0 auto;min-height:100vh;padding-bottom:28px;position:relative;
+  body{position:relative;height:100%;overflow:hidden;
     -webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
-  body.locked{position:fixed;left:0;right:0;width:100%;overflow:hidden}
+  /* ===== Swipeable pager ===== */
+  .pager{position:fixed;inset:0;display:flex;overflow-x:auto;overflow-y:hidden;
+    scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .pager::-webkit-scrollbar{display:none}
+  .pager.locked,.pager.locked .page{overflow:hidden}
+  .page{flex:0 0 100%;width:100vw;height:100%;overflow-y:auto;overflow-x:hidden;
+    scroll-snap-align:start;-webkit-overflow-scrolling:touch;padding-bottom:46px}
+  #pageToday>header,#pageToday>main,#pageToday>.ver,.page-h,.page-body{max-width:520px;margin-left:auto;margin-right:auto}
+  .page-h{display:flex;align-items:center;justify-content:space-between;
+    padding:calc(env(safe-area-inset-top) + 20px) 18px 12px;font-size:23px;font-weight:800;letter-spacing:-.4px}
+  .page-new{font-size:14px;font-weight:700;color:var(--accent);background:var(--card);
+    border:1px solid var(--line);border-radius:11px;padding:8px 13px}
+  .page-body{padding:2px 14px 24px}
+  .dots{position:fixed;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + 12px);
+    display:flex;gap:7px;justify-content:center;z-index:45}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--card2);transition:all .25s ease}
+  .dot.on{background:var(--accent);width:22px;border-radius:4px}
   h1,h2,h3{margin:0;font-weight:700}
   button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit;
     touch-action:manipulation;transition:transform .08s ease}
@@ -199,17 +215,16 @@
 </head>
 <body>
 
+<div class="pager" id="pager">
+
+<section class="page" id="pageToday">
 <header>
   <div class="date-row">
     <div class="brand"><div class="logo">S</div><h1>Snacc</h1></div>
-    <div class="hdr-actions">
-      <button class="hicon" onclick="openInsights()" title="Insights">📊</button>
-      <button class="hicon" onclick="openRecipes()" title="Recipes">🍲</button>
-      <div class="date-nav">
-        <button onclick="changeDay(-1)">‹</button>
-        <span class="dlabel" id="dateLabel" onclick="goToday()">Today</span>
-        <button onclick="changeDay(1)">›</button>
-      </div>
+    <div class="date-nav">
+      <button onclick="changeDay(-1)">‹</button>
+      <span class="dlabel" id="dateLabel" onclick="goToday()">Today</span>
+      <button onclick="changeDay(1)">›</button>
     </div>
   </div>
   <div class="dash">
@@ -237,6 +252,25 @@
 
 <main id="diary"></main>
 <div class="ver" id="ver" onclick="openSettings()"></div>
+</section>
+
+<section class="page" id="pageInsights">
+  <div class="page-h">Insights</div>
+  <div class="page-body" id="insightsBody"></div>
+</section>
+
+<section class="page" id="pageRecipes">
+  <div class="page-h">Recipes<button class="page-new" onclick="newRecipe()">＋ New</button></div>
+  <div class="page-body" id="recipesList"></div>
+</section>
+
+</div><!-- /pager -->
+
+<div class="dots" id="dots">
+  <span class="dot on" onclick="goToPage(0)"></span>
+  <span class="dot" onclick="goToPage(1)"></span>
+  <span class="dot" onclick="goToPage(2)"></span>
+</div>
 
 <!-- Add sheet -->
 <div class="scrim" id="addScrim" onclick="closeAdd()"></div>
@@ -255,25 +289,6 @@
     </div>
   </div>
   <div class="add-results" id="addResults"></div>
-</div>
-
-<!-- Insights page -->
-<div class="scrim" id="insightsScrim" onclick="closeInsights()"></div>
-<div class="sheet" id="insightsSheet">
-  <div class="grab"></div>
-  <div class="add-top"><div class="add-title">Insights</div></div>
-  <div class="add-results" id="insightsBody"></div>
-</div>
-
-<!-- Recipes page -->
-<div class="scrim" id="recipesScrim" onclick="closeRecipes()"></div>
-<div class="sheet" id="recipesSheet">
-  <div class="grab"></div>
-  <div class="add-top">
-    <div class="add-title">Your recipes</div>
-    <div class="add-actions"><button onclick="newRecipe()">＋ New recipe</button></div>
-  </div>
-  <div class="add-results" id="recipesList"></div>
 </div>
 
 <!-- Portion / form modal -->
@@ -714,9 +729,9 @@ function saveRecipe(){const r=recipeDraft;
   delete r.servings;delete r.totalG;            // drop legacy fields
   const idx=recipes.findIndex(x=>x.id===r.id);
   if(idx>=0)recipes[idx]=r;else recipes.unshift(r);
-  saveAll();addTarget='log';recipeDraft=null;closeModal();renderQuick();if(recipesPageOpen())renderRecipesPage();toast('Recipe saved');
+  saveAll();addTarget='log';recipeDraft=null;closeModal();renderQuick();renderRecipesPage();toast('Recipe saved');
 }
-function deleteRecipe(id){recipes=recipes.filter(x=>x.id!==id);saveAll();addTarget='log';recipeDraft=null;closeModal();renderQuick();if(recipesPageOpen())renderRecipesPage();toast('Recipe deleted');}
+function deleteRecipe(id){recipes=recipes.filter(x=>x.id!==id);saveAll();addTarget='log';recipeDraft=null;closeModal();renderQuick();renderRecipesPage();toast('Recipe deleted');}
 function recipeFood(rec){const t=recipeTotals(rec),tg=recipeTotalG(rec),sg=servG(rec);
   if(tg>0){const r=100/tg;                       // per-100g of total weight; serving = sg grams
     return{name:rec.name,brand:'',cal:Math.round(t.cal*r),p:+(t.p*r).toFixed(1),c:+(t.c*r).toFixed(1),f:+(t.f*r).toFixed(1),
@@ -725,9 +740,9 @@ function recipeFood(rec){const t=recipeTotals(rec),tg=recipeTotalG(rec),sg=servG
   return{name:rec.name,brand:'',cal:per.cal,p:per.p,c:per.c,f:per.f,servingG:100,sl:'serving',ps:true};}
 function logRecipe(id){const r=recipes.find(x=>x.id===id);if(!r)return;
   addTarget='log';openPortion(recipeFood(r));}
-function openRecipes(){closeAdd();renderRecipesPage();showSheet('recipesScrim','recipesSheet');}
-function closeRecipes(){hideSheet('recipesScrim','recipesSheet');}
-function recipesPageOpen(){return document.getElementById('recipesSheet').classList.contains('show');}
+function openRecipes(){goToPage(2);}
+function closeRecipes(){goToPage(0);}
+function recipesPageOpen(){return curPage===2;}
 function recipeMgmtCard(r){const per=recipePer(r),n=(r.items||[]).length,sg=servG(r);
   const sub=sg>0?`${per.cal} kcal / ${Math.round(sg)} g serving · ${n} ingredient${n===1?'':'s'}`
                 :`${per.cal} kcal · ${n} ingredient${n===1?'':'s'} · set serving size`;
@@ -777,9 +792,9 @@ function weightLineSVG(){
   return `<svg viewBox="0 0 ${W} ${H}"><defs><linearGradient id="wln" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff9f43"/><stop offset="1" stop-color="#ffb02e"/></linearGradient></defs>`+
     `${gl}<path d="${d}" fill="none" stroke="url(#wln)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>${dots}</svg>`;
 }
-function openInsights(){closeAdd();renderInsights();showSheet('insightsScrim','insightsSheet');}
-function closeInsights(){hideSheet('insightsScrim','insightsSheet');}
-function insightsOpen(){return document.getElementById('insightsSheet').classList.contains('show');}
+function openInsights(){goToPage(1);}
+function closeInsights(){goToPage(0);}
+function insightsOpen(){return curPage===1;}
 function setWUnit(u){wUnit=u;saveAll();renderInsights();}
 function saveWeight(){const v=parseFloat(document.getElementById('wInput').value);
   if(!v||v<=0){toast('Enter a weight');return;}
@@ -894,10 +909,20 @@ function saveGoals(){
   saveAll();closeModal();renderDashboard();toast('Goals updated');
 }
 
+/* ===== Pager (swipeable pages) ===== */
+let curPage=0;
+function pagerEl(){return document.getElementById('pager');}
+function updateDots(){const ds=document.querySelectorAll('#dots .dot');ds.forEach((d,i)=>d.classList.toggle('on',i===curPage));}
+function onPageEnter(i){if(i===1)renderInsights();else if(i===2)renderRecipesPage();}
+function goToPage(i){const p=pagerEl();curPage=i;updateDots();onPageEnter(i);
+  const x=i*p.clientWidth;if(p.scrollTo)p.scrollTo({left:x,behavior:'smooth'});else p.scrollLeft=x;}
+function onPagerScroll(){const p=pagerEl(),i=Math.round(p.scrollLeft/(p.clientWidth||1));
+  if(i!==curPage){curPage=i;updateDots();onPageEnter(i);}}
+
 /* ===== Sheet helpers ===== */
-let sheetCount=0, scrollLockY=0;
-function lockBody(){scrollLockY=window.scrollY||window.pageYOffset||0;document.body.style.top=(-scrollLockY)+'px';document.body.classList.add('locked');}
-function unlockBody(){document.body.classList.remove('locked');document.body.style.top='';window.scrollTo(0,scrollLockY);}
+let sheetCount=0;
+function lockBody(){pagerEl().classList.add('locked');}
+function unlockBody(){pagerEl().classList.remove('locked');}
 function showSheet(scrim,sheet){const el=document.getElementById(sheet);
   document.getElementById(scrim).classList.add('show');
   if(el.classList.contains('show'))return;            // already open → don't double-count
@@ -1192,7 +1217,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v3.7 · 2026-06-28';
+const APP_VERSION='v3.8 · 2026-06-28';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
@@ -1207,6 +1232,9 @@ renderVer();
 })();
 normalizeGoals();
 refresh();
+renderInsights();renderRecipesPage();   // pre-render swipe pages so they're ready
+pagerEl().addEventListener('scroll',onPagerScroll,{passive:true});
+window.addEventListener('resize',()=>{const p=pagerEl();p.scrollLeft=curPage*p.clientWidth;});
 enableDrag('addSheet',closeAdd);
 enableDrag('modal',closeModal);
 enableDrag('scanModal',closeScanner);
