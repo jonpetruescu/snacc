@@ -22,12 +22,15 @@
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
     font-family:ui-rounded,"SF Pro Rounded",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-    -webkit-font-smoothing:antialiased}
-  body{max-width:520px;margin:0 auto;min-height:100vh;padding-bottom:28px;position:relative}
+    -webkit-font-smoothing:antialiased;overscroll-behavior:none}
+  body{max-width:520px;margin:0 auto;min-height:100vh;padding-bottom:28px;position:relative;
+    -webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
   body.locked{position:fixed;left:0;right:0;width:100%;overflow:hidden}
   h1,h2,h3{margin:0;font-weight:700}
-  button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
-  input,select{font-family:inherit}
+  button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit;
+    touch-action:manipulation;transition:transform .08s ease}
+  button:active{transform:scale(.97)}
+  input,select,textarea{font-family:inherit;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}
   .spinner{display:inline-block;width:20px;height:20px;border:2.5px solid var(--card2);
     border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle}
   @keyframes spin{to{transform:rotate(360deg)}}
@@ -157,6 +160,8 @@
   .m-actions .save{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#2a1400}
   .m-actions .star{flex:0 0 52px;background:var(--card2);font-size:20px;color:var(--muted)}
   .m-actions .star.on{color:var(--amber)}
+  .m-actions .torch{flex:0 0 auto;padding:14px 18px;background:var(--card2);color:var(--text)}
+  .m-actions .torch.on{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#2a1400}
 
   #reader{width:100%;border-radius:14px;overflow:hidden;margin:10px 0}
   .toast{position:fixed;bottom:104px;left:50%;transform:translateX(-50%);background:var(--card2);
@@ -247,7 +252,10 @@
   <h3>Scan barcode</h3>
   <div class="msub">Point your camera at the package barcode</div>
   <div id="reader"></div>
-  <div class="m-actions"><button class="cancel" onclick="closeScanner()">Close</button></div>
+  <div class="m-actions">
+    <button class="cancel" onclick="closeScanner()">Close</button>
+    <button class="torch" id="torchBtn" onclick="toggleTorch()" style="display:none">🔦 Light</button>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -955,19 +963,38 @@ function saveLabelFood(){
 }
 
 /* ===== Scanner ===== */
-let qr=null,lastScan=0;
+let qr=null,lastScan=0,torchOn=false;
+function scanTrack(){const v=document.querySelector('#reader video');
+  return v&&v.srcObject&&v.srcObject.getVideoTracks?v.srcObject.getVideoTracks()[0]:null;}
 function openScanner(){
+  torchOn=false;
+  const tb=document.getElementById('torchBtn');tb.style.display='none';tb.classList.remove('on');
   showSheet('scanScrim','scanModal');
   qr=new Html5Qrcode('reader');
-  const cfg={fps:15,qrbox:{width:280,height:170},disableFlip:true,
+  // Wide, responsive box suits 1D grocery barcodes; bigger frame = easier aim.
+  const qbox=(vw,vh)=>{const w=Math.min(vw-24,360);return{width:w,height:Math.round(w*0.6)};};
+  const cfg={fps:15,qrbox:qbox,disableFlip:true,
     experimentalFeatures:{useBarCodeDetectorIfSupported:true},
     formatsToSupport:[Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.EAN_8,
-      Html5QrcodeSupportedFormats.UPC_A,Html5QrcodeSupportedFormats.UPC_E]};
-  qr.start({facingMode:'environment'},cfg,onScan,()=>{}).catch(()=>{toast('Camera unavailable. Allow camera access.');closeScanner();});
+      Html5QrcodeSupportedFormats.UPC_A,Html5QrcodeSupportedFormats.UPC_E,
+      Html5QrcodeSupportedFormats.UPC_EAN_EXTENSION,Html5QrcodeSupportedFormats.CODE_128]};
+  // High-res rear camera + continuous autofocus → much better on small/curved labels.
+  const cam={facingMode:'environment',width:{ideal:1920},height:{ideal:1080},
+    advanced:[{focusMode:'continuous'}]};
+  qr.start(cam,cfg,onScan,()=>{})
+    .then(()=>{try{const t=scanTrack();const caps=t&&t.getCapabilities?t.getCapabilities():null;
+      if(caps&&'torch'in caps&&caps.torch)tb.style.display='';}catch(e){}})
+    .catch(()=>{toast('Camera unavailable. Allow camera access.');closeScanner();});
 }
+function toggleTorch(){const t=scanTrack();if(!t){toast('Torch not available');return;}
+  const next=!torchOn;
+  t.applyConstraints({advanced:[{torch:next}]})
+    .then(()=>{torchOn=next;document.getElementById('torchBtn').classList.toggle('on',torchOn);})
+    .catch(()=>toast('Torch not available'));}
 function onScan(text){const now=Date.now();if(now-lastScan<2500)return;lastScan=now;
   if(navigator.vibrate)navigator.vibrate(60);closeScanner();lookupBarcode(text.replace(/\D/g,''));}
-function closeScanner(){hideSheet('scanScrim','scanModal');if(qr){qr.stop().then(()=>{qr.clear();qr=null;}).catch(()=>{qr=null;});}}
+function closeScanner(){hideSheet('scanScrim','scanModal');torchOn=false;
+  if(qr){qr.stop().then(()=>{qr.clear();qr=null;}).catch(()=>{qr=null;});}}
 
 /* ===== Utils ===== */
 function esc(s){return (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -976,7 +1003,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v3.1 · 2026-06-28';
+const APP_VERSION='v3.2 · 2026-06-28';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
