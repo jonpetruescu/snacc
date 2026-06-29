@@ -799,18 +799,65 @@ function renderInsights(){
 }
 
 /* ===== Goals ===== */
-function editGoals(){
+function editGoals(pre){pre=pre||goals;
   document.getElementById('modal').innerHTML=`
     <div class="grab"></div>
     <h3>Daily goals</h3><div class="msub">Set total calories, then the % of calories for each macro — grams calculate automatically.</div>
-    <div class="row"><label>Calories</label><input id="gCal" type="number" inputmode="numeric" value="${goals.cal}" oninput="updGoal()"></div>
-    <div class="row"><label>Protein %</label><input id="gPp" type="number" inputmode="numeric" value="${goals.pPct}" oninput="updGoal()"><span class="gg" id="ggP">0 g</span></div>
-    <div class="row"><label>Carbs %</label><input id="gCp" type="number" inputmode="numeric" value="${goals.cPct}" oninput="updGoal()"><span class="gg" id="ggC">0 g</span></div>
-    <div class="row"><label>Fat %</label><input id="gFp" type="number" inputmode="numeric" value="${goals.fPct}" oninput="updGoal()"><span class="gg" id="ggF">0 g</span></div>
+    <button class="goal-edit" style="margin:2px auto 14px;display:block" onclick="openGoalCalc()">✨ Calculate from my stats</button>
+    <div class="row"><label>Calories</label><input id="gCal" type="number" inputmode="numeric" value="${pre.cal}" oninput="updGoal()"></div>
+    <div class="row"><label>Protein %</label><input id="gPp" type="number" inputmode="numeric" value="${pre.pPct}" oninput="updGoal()"><span class="gg" id="ggP">0 g</span></div>
+    <div class="row"><label>Carbs %</label><input id="gCp" type="number" inputmode="numeric" value="${pre.cPct}" oninput="updGoal()"><span class="gg" id="ggC">0 g</span></div>
+    <div class="row"><label>Fat %</label><input id="gFp" type="number" inputmode="numeric" value="${pre.fPct}" oninput="updGoal()"><span class="gg" id="ggF">0 g</span></div>
     <div class="gtot" id="gTot"></div>
     <div class="m-actions"><button class="cancel" onclick="closeModal()">Cancel</button>
       <button class="save" onclick="saveGoals()">Save</button></div>`;
   showSheet('modalScrim','modal'); updGoal();
+}
+function openGoalCalc(){
+  const c=goals.calc||{};const himp=wUnit==='lb';
+  const wk=Object.keys(weights).sort();
+  const curW=wk.length?dispW(weights[wk[wk.length-1]]).toFixed(1):'';
+  const hVal=c.heightCm?(himp?Math.round(c.heightCm/2.54):c.heightCm):'';
+  const aSel=v=>String(c.act||1.55)===v?'selected':'';
+  document.getElementById('modal').innerHTML=`
+    <div class="grab"></div>
+    <h3>Calculate my goal</h3>
+    <div class="msub">Estimates daily calories (Mifflin-St Jeor) plus a protein-forward macro split. Tweak anything after.</div>
+    <div class="row"><label>Sex</label><select id="gcSex"><option value="M" ${c.sex!=='F'?'selected':''}>Male</option><option value="F" ${c.sex==='F'?'selected':''}>Female</option></select></div>
+    <div class="row"><label>Age</label><input id="gcAge" type="number" inputmode="numeric" value="${c.age||''}" placeholder="years"></div>
+    <div class="row"><label>Height (${himp?'in':'cm'})</label><input id="gcHt" type="number" inputmode="decimal" value="${hVal}" placeholder="${himp?'e.g. 70':'e.g. 178'}"></div>
+    <div class="row"><label>Weight (${wUnit})</label><input id="gcWt" type="number" inputmode="decimal" value="${curW}" placeholder="current"></div>
+    <div class="row"><label>Activity</label><select id="gcAct">
+      <option value="1.2" ${aSel('1.2')}>Sedentary</option>
+      <option value="1.375" ${aSel('1.375')}>Lightly active</option>
+      <option value="1.55" ${aSel('1.55')}>Moderately active</option>
+      <option value="1.725" ${aSel('1.725')}>Very active</option>
+      <option value="1.9" ${aSel('1.9')}>Athlete</option></select></div>
+    <div class="row"><label>Goal</label><select id="gcGoal">
+      <option value="-500">Lose (~0.5 kg/wk)</option>
+      <option value="0" selected>Maintain</option>
+      <option value="350">Gain muscle</option></select></div>
+    <div class="m-actions"><button class="cancel" onclick="editGoals()">Back</button>
+      <button class="save" onclick="applyGoalCalc()">Calculate</button></div>`;
+  showSheet('modalScrim','modal');
+}
+function applyGoalCalc(){
+  const sex=document.getElementById('gcSex').value;
+  const age=+document.getElementById('gcAge').value||0;
+  const htRaw=+document.getElementById('gcHt').value||0;
+  const wtRaw=+document.getElementById('gcWt').value||0;
+  const act=+document.getElementById('gcAct').value||1.55;
+  const delta=+document.getElementById('gcGoal').value||0;
+  const cm=wUnit==='lb'?htRaw*2.54:htRaw, kg=toKg(wtRaw);
+  if(age<=0||cm<=0||kg<=0){toast('Fill in age, height, and weight');return;}
+  const bmr=10*kg+6.25*cm-5*age+(sex==='M'?5:-161);
+  let cal=Math.round((bmr*act+delta)/10)*10; if(cal<1200)cal=1200;
+  const proteinG=Math.round(1.6*kg);
+  const pPct=Math.max(15,Math.min(45,Math.round(proteinG*4/cal*100)));
+  const fPct=25, cPct=Math.max(10,100-pPct-fPct);
+  goals.calc={sex,age,heightCm:Math.round(cm),act};saveAll();
+  editGoals({cal,pPct,cPct,fPct});
+  toast('Calculated — review & Save');
 }
 function updGoal(){
   const cal=+document.getElementById('gCal').value||0;
@@ -825,7 +872,7 @@ function updGoal(){
 function saveGoals(){
   const cal=+document.getElementById('gCal').value||2000;
   const pPct=+document.getElementById('gPp').value||0,cPct=+document.getElementById('gCp').value||0,fPct=+document.getElementById('gFp').value||0;
-  goals={cal,pPct,cPct,fPct,p:gG(cal,pPct,4),c:gG(cal,cPct,4),f:gG(cal,fPct,9)};
+  goals={...goals,cal,pPct,cPct,fPct,p:gG(cal,pPct,4),c:gG(cal,cPct,4),f:gG(cal,fPct,9)};
   saveAll();closeModal();renderDashboard();toast('Goals updated');
 }
 
@@ -1127,7 +1174,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v3.5 · 2026-06-28';
+const APP_VERSION='v3.6 · 2026-06-28';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
