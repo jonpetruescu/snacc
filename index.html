@@ -206,6 +206,15 @@
   .row input{flex:1;background:var(--card2);border:1px solid var(--line);border-radius:11px;
     padding:12px;color:var(--text);font-size:16px;outline:none;text-align:center}
   .row input.amt{flex:0 0 90px}
+  .amt-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .amt-row .amt{flex:1;text-align:center;font-size:21px;font-weight:800;
+    background:var(--card2);border:1px solid var(--line);border-radius:11px;padding:11px;color:var(--text);outline:none}
+  .step{flex:0 0 48px;height:48px;border-radius:12px;background:var(--card2);color:var(--text);
+    font-size:24px;font-weight:600;display:flex;align-items:center;justify-content:center}
+  .step:active{background:var(--line)}
+  .chips{display:flex;gap:8px;margin:0 0 14px}
+  .chips button{flex:1;padding:9px 4px;border-radius:11px;background:var(--card2);color:var(--muted);font-size:14px;font-weight:700}
+  .chips button.on{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#2a1400}
   .row select{flex:1;background:var(--card2);border:1px solid var(--line);border-radius:11px;padding:12px;color:var(--text);font-size:15px;outline:none}
   .row .gg{flex:0 0 56px;text-align:right;font-size:14px;font-weight:700;color:var(--accent)}
   .gtot{text-align:center;font-size:13px;font-weight:600;margin:2px 0 16px}
@@ -341,7 +350,8 @@ let curDate=todayKey();
 let pendingFood=null, selectedMeal='Snacks', addMeal='Snacks', editingId=null;
 let barcache=LS.get('ct_barcache',{});
 let recipes=LS.get('ct_recipes',[]);
-let recipeDraft=null, addTarget='log', editIngIdx=null, addView='main';
+let recipeDraft=null, addTarget='log', editIngIdx=null, addView='main', pUnit='g';
+let lastPortion=LS.get('ct_lastportion',{});   // fkey -> {u:unit, a:amount}
 let weights=LS.get('ct_weights',{});   // dateKey -> kg (canonical)
 let wUnit=LS.get('ct_wunit','lb');     // display unit: 'lb' | 'kg'
 const MEALS=['Breakfast','Lunch','Dinner','Snacks'];
@@ -565,7 +575,13 @@ function openPortion(food,editId,ex){
   const editing=!!editId, ps=!!food.ps, hasServ=!!food.servingG, rmode=addTarget==='recipe';
   let unit,amt;
   if(ps){unit='serv';amt=editing?+(ex.amount/(food.servingG||100)).toFixed(2):1;}
-  else if(editing){unit='g';amt=ex.amount;} else if(hasServ){unit='serv';amt=1;} else {unit='g';amt=100;}
+  else if(editing){unit='g';amt=ex.amount;}
+  else {
+    const lp=lastPortion[fkey(food)];                                   // remember last portion
+    if(lp&&(lp.u==='g'||lp.u==='oz'||(lp.u==='serv'&&hasServ))){unit=lp.u;amt=lp.a;}
+    else if(hasServ){unit='serv';amt=1;} else {unit='g';amt=100;}
+  }
+  pUnit=unit;
   const slClean=(food.sl&&food.sl!=='serving')?food.sl:'';
   const servOpt=ps?('serving'+(slClean?' ('+esc(slClean)+')':'')):('serving ('+(food.sl?esc(food.sl)+', ':'')+food.servingG+' g)');
   const perLabel=ps?('per '+(slClean?esc(slClean):'serving')):'per 100g';
@@ -579,27 +595,50 @@ function openPortion(food,editId,ex){
       <div class="nbox"><div class="nv" id="mP">0</div><div class="nl">protein</div></div>
       <div class="nbox"><div class="nv" id="mC">0</div><div class="nl">carbs</div></div>
       <div class="nbox"><div class="nv" id="mF">0</div><div class="nl">fat</div></div></div>
-    <div class="row">
-      <input class="amt" id="amtInput" type="number" inputmode="decimal" value="${amt}" min="${ps?'0.25':'1'}" step="${ps?'0.25':'1'}" oninput="updMacros()">
-      <select id="unitSel" onchange="onUnit()">
+    <div class="amt-row">
+      <button class="step" onclick="stepAmt(-1)">−</button>
+      <input class="amt" id="amtInput" type="number" inputmode="decimal" value="${amt}" oninput="onAmtInput()">
+      <button class="step" onclick="stepAmt(1)">+</button></div>
+    <div class="row" style="margin-bottom:9px">
+      <select id="unitSel" onchange="onUnit()" style="flex:1">
         ${(hasServ||ps)?`<option value="serv" ${unit==='serv'?'selected':''}>${servOpt}</option>`:''}
         ${ps?'':`<option value="g" ${unit==='g'?'selected':''}>grams</option>`}
+        ${ps?'':`<option value="oz" ${unit==='oz'?'selected':''}>ounces (oz)</option>`}
       </select></div>
+    <div class="chips" id="portionChips"></div>
     ${rmode?'':`<div class="seg" id="mealSeg">${MEALS.map(m=>`<button class="${m===selectedMeal?'on':''}" onclick="setMeal('${m}')">${m}</button>`).join('')}</div>`}
     <div class="m-actions">
       ${rmode?'':`<button class="star ${isSaved?'on':''}" id="starBtn" onclick="toggleSave()">★</button>`}
       <button class="cancel" onclick="${rmode?'backToBuilder()':'closeModal()'}">Cancel</button>
       <button class="save" onclick="confirmAdd()">${rmode?(editIngIdx!=null?'Update ingredient':'Add to recipe'):(editing?'Save':'Add')}</button></div>`;
-  updMacros();
+  renderChips();updMacros();
   showSheet('modalScrim','modal');
 }
 function backToBuilder(){closeModal();if(recipeDraft)openRecipeBuilder();}
+const OZ=28.3495;
+const CHIPVALS={serv:[0.5,1,1.5,2],g:[50,100,150,200],oz:[1,2,3,4]};
+function unitToG(u){return u==='serv'?(pendingFood.servingG||100):u==='oz'?OZ:1;}
+function unitStep(u){return u==='serv'?0.5:u==='oz'?0.5:10;}
+function unitMin(u){return u==='serv'?0.25:u==='oz'?0.1:1;}
+function roundAmt(v,u){return u==='serv'?Math.round(v*4)/4:u==='oz'?Math.round(v*10)/10:Math.round(v);}
 function curGrams(){const v=parseFloat(document.getElementById('amtInput').value)||0;
-  return document.getElementById('unitSel').value==='serv'?v*(pendingFood.servingG||100):v;}
+  return v*unitToG(document.getElementById('unitSel').value);}
 function updMacros(){const m=calcMacros(pendingFood,curGrams());
   document.getElementById('mCal').textContent=m.cal;document.getElementById('mP').textContent=m.p;
   document.getElementById('mC').textContent=m.c;document.getElementById('mF').textContent=m.f;}
-function onUnit(){document.getElementById('amtInput').value=document.getElementById('unitSel').value==='serv'?1:(pendingFood.servingG||100);updMacros();}
+function renderChips(){const vals=CHIPVALS[pUnit]||[],cur=parseFloat(document.getElementById('amtInput').value);
+  const lbl=pUnit==='serv'?(v=>v):pUnit==='oz'?(v=>v+' oz'):(v=>v+' g');
+  document.getElementById('portionChips').innerHTML=vals.map(v=>
+    `<button class="${Math.abs(v-cur)<1e-9?'on':''}" onclick="setAmt(${v})">${lbl(v)}</button>`).join('');}
+function setAmt(v){document.getElementById('amtInput').value=v;renderChips();updMacros();}
+function onAmtInput(){renderChips();updMacros();}
+function stepAmt(d){let v=(parseFloat(document.getElementById('amtInput').value)||0)+d*unitStep(pUnit);
+  if(v<unitMin(pUnit))v=unitMin(pUnit);v=roundAmt(v,pUnit);
+  document.getElementById('amtInput').value=v;renderChips();updMacros();}
+function onUnit(){const sel=document.getElementById('unitSel').value;
+  const grams=(parseFloat(document.getElementById('amtInput').value)||0)*unitToG(pUnit);
+  let na=roundAmt(grams/unitToG(sel),sel);if(na<unitMin(sel))na=unitMin(sel);
+  document.getElementById('amtInput').value=na;pUnit=sel;renderChips();updMacros();}
 function setMeal(m){selectedMeal=m;[...document.querySelectorAll('#mealSeg button')].forEach(b=>b.classList.toggle('on',b.textContent===m));}
 function confirmAdd(){
   const g=curGrams();if(g<=0){toast('Enter an amount');return;}
@@ -614,6 +653,8 @@ function confirmAdd(){
     else recipeDraft.items.push(item);
     editIngIdx=null;hideSheet('addScrim','addSheet');closeModal();openRecipeBuilder();toast('Ingredient added');return;
   }
+  lastPortion[fkey(pendingFood)]={u:document.getElementById('unitSel').value,a:parseFloat(document.getElementById('amtInput').value)||0};
+  LS.set('ct_lastportion',lastPortion);
   if(editingId){
     const e=(logs[curDate]||[]).find(x=>x.id===editingId);
     if(e){e.meal=selectedMeal;e.amount=Math.round(g);e.cal=m.cal;e.p=m.p;e.c=m.c;e.f=m.f;e.b=b;delete e.quick;}
@@ -1285,7 +1326,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v4.5 · 2026-06-28';
+const APP_VERSION='v4.6 · 2026-06-28';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
