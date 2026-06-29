@@ -128,7 +128,8 @@
     background:var(--bg2);border-radius:24px 24px 0 0;transform:translateY(100%);transition:transform .3s cubic-bezier(.3,.8,.3,1);
     display:flex;flex-direction:column;max-height:90vh}
   .sheet.show{transform:translateY(0)}
-  .grab{width:38px;height:4px;border-radius:3px;background:var(--card2);margin:10px auto 4px}
+  .grab{width:40px;height:5px;border-radius:3px;background:var(--card2);
+    margin:0 auto;padding:11px 60px;box-sizing:content-box;background-clip:content-box;cursor:grab}
 
   /* Add sheet */
   #addSheet{height:88vh}
@@ -950,17 +951,42 @@ function showSheet(scrim,sheet){const el=document.getElementById(sheet);
 function hideSheet(scrim,sheet){const el=document.getElementById(sheet),was=el.classList.contains('show');
   document.getElementById(scrim).classList.remove('show');el.classList.remove('show');
   if(was){sheetCount=Math.max(0,sheetCount-1);if(sheetCount===0)unlockBody();}}
-// Drag the sheet down to dismiss. Ignores touches on inputs/buttons and scroll areas.
+// Drag the sheet down to dismiss. Consistent rules:
+//  • the grab handle / title bar is always a drag zone
+//  • elsewhere, a scroll list only pulls-to-dismiss when it's already at the top
+//  • interactive controls never start a drag; horizontal gestures are ignored
+//  • a flick closes; a real drag suppresses the trailing click (no accidental taps)
 function enableDrag(sheetId,closeFn){
-  const sheet=document.getElementById(sheetId);let startY=0,dy=0,drag=false;
+  const sheet=document.getElementById(sheetId);
+  let startY=0,startX=0,dy=0,drag=false,fromHandle=false,t0=0,moved=false;
+  const isHandle=t=>!!(t.closest&&t.closest('.grab,.add-title,h3,.msub'));
+  const scrollerOf=t=>t.closest&&t.closest('.add-results');
   sheet.addEventListener('touchstart',e=>{
-    if(e.target.closest('input,select,textarea,button,.add-results'))return;
-    startY=e.touches[0].clientY;dy=0;drag=true;sheet.style.transition='none';
+    const t=e.target;moved=false;drag=false;fromHandle=isHandle(t);
+    if(!fromHandle){
+      if(t.closest&&t.closest('input,select,textarea,button,a'))return;   // let controls work
+      const sc=scrollerOf(t);
+      if(sc&&sc.scrollTop>0)return;                                       // let the list scroll
+    }
+    startY=e.touches[0].clientY;startX=e.touches[0].clientX;dy=0;t0=Date.now();drag=true;
+    sheet.style.transition='none';
   },{passive:true});
-  sheet.addEventListener('touchmove',e=>{if(!drag)return;dy=e.touches[0].clientY-startY;
-    if(dy<0)dy=0;sheet.style.transform='translateY('+dy+'px)';},{passive:true});
-  sheet.addEventListener('touchend',()=>{if(!drag)return;drag=false;sheet.style.transition='';
-    const shouldClose=dy>90;sheet.style.transform='';if(shouldClose)closeFn();});
+  sheet.addEventListener('touchmove',e=>{
+    if(!drag)return;
+    const y=e.touches[0].clientY,x=e.touches[0].clientX;dy=y-startY;
+    if(!fromHandle&&Math.abs(x-startX)>Math.abs(dy)+6){drag=false;sheet.style.transform='';return;} // horizontal
+    if(dy<=0){dy=0;sheet.style.transform='';return;}
+    if(!fromHandle){const sc=scrollerOf(e.target);if(sc&&sc.scrollTop>0){drag=false;sheet.style.transform='';return;}}
+    if(dy>8)moved=true;
+    sheet.style.transform='translateY('+dy+'px)';
+  },{passive:true});
+  sheet.addEventListener('touchend',()=>{
+    if(!drag)return;drag=false;sheet.style.transition='';
+    const dt=Date.now()-t0, flick=dy>45&&dt<300;
+    sheet.style.transform='';
+    if(dy>110||flick)closeFn();
+  });
+  sheet.addEventListener('click',e=>{if(moved){e.preventDefault();e.stopPropagation();moved=false;}},true);
 }
 
 /* ===== Cloud backup (GitHub, optional) ===== */
@@ -1237,7 +1263,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v4.2 · 2026-06-28';
+const APP_VERSION='v4.3 · 2026-06-28';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
