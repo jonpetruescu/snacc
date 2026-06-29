@@ -93,6 +93,9 @@
   .entry .del{width:28px;height:28px;border-radius:8px;background:transparent;color:#5d6475;font-size:15px;
     display:flex;align-items:center;justify-content:center}
   .meal-empty{padding:4px 12px 14px;color:#5d6475;font-size:12.5px}
+  .meal-empty a{color:var(--accent);cursor:pointer;font-weight:600}
+  .copyday{display:block;width:100%;background:var(--card);border:1px dashed var(--line);border-radius:14px;
+    padding:13px;color:var(--accent);font-weight:600;font-size:14px;margin-bottom:12px}
 
   /* ===== Floating add button ===== */
   .fab{position:fixed;left:50%;transform:translateX(-50%);
@@ -364,9 +367,23 @@ function entryAmtLabel(e){
   if(b&&b.ps){const n=+(e.amount/(b.g||100)).toFixed(2),lbl=esc(b.sl||'serving');return (n===1?lbl:n+' × '+lbl)+' · ';}
   return e.amount+' g · ';
 }
+function prevDayWith(pred){const ks=Object.keys(logs).filter(k=>k<curDate).sort().reverse();
+  for(const k of ks)if((logs[k]||[]).length&&pred(k))return k;return null;}
+function newId(){return Date.now()+''+Math.random().toString(36).slice(2,6);}
+function copyDay(){const src=prevDayWith(()=>true);if(!src){toast('No earlier day to copy');return;}
+  const items=(logs[src]||[]).map(e=>({...e,id:newId()}));
+  logs[curDate]=(logs[curDate]||[]).concat(items);saveAll();refresh();
+  toast('Copied '+items.length+' item'+(items.length===1?'':'s')+' from '+fmtDate(src));}
+function copyMeal(meal){const src=prevDayWith(k=>(logs[k]||[]).some(e=>mealOf(e)===meal));
+  if(!src){toast('Nothing earlier to copy');return;}
+  const items=(logs[src]||[]).filter(e=>mealOf(e)===meal).map(e=>({...e,id:newId(),meal}));
+  logs[curDate]=(logs[curDate]||[]).concat(items);saveAll();refresh();
+  toast('Copied '+items.length+' to '+meal);}
 function renderDiary(){
   const entries=logs[curDate]||[];
   let html='';
+  if(!entries.length){const src=prevDayWith(()=>true);
+    if(src)html+=`<button class="copyday" onclick="copyDay()">📋 Copy everything from ${fmtDate(src)}</button>`;}
   MEALS.forEach(meal=>{
     const es=entries.filter(e=>mealOf(e)===meal);
     const sub=Math.round(es.reduce((s,e)=>s+e.cal,0));
@@ -382,7 +399,8 @@ function renderDiary(){
           <div class="ec">${e.cal}<small>kcal</small></div>
           <button class="del" onclick="removeEntry('${e.id}')">✕</button></div>`).join('')+'</div>';
     } else {
-      html+='<div class="meal-empty">Nothing yet — tap ＋ to add</div>';
+      const src=prevDayWith(k=>(logs[k]||[]).some(e=>mealOf(e)===meal));
+      html+=`<div class="meal-empty">Nothing yet — tap ＋ to add${src?` · <a onclick="copyMeal('${meal}')">copy from ${fmtDate(src)}</a>`:''}</div>`;
     }
     html+='</div>';
   });
@@ -1174,7 +1192,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v3.6 · 2026-06-28';
+const APP_VERSION='v3.7 · 2026-06-28';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
