@@ -966,25 +966,36 @@ function saveLabelFood(){
 let qr=null,lastScan=0,torchOn=false;
 function scanTrack(){const v=document.querySelector('#reader video');
   return v&&v.srcObject&&v.srcObject.getVideoTracks?v.srcObject.getVideoTracks()[0]:null;}
-function openScanner(){
-  torchOn=false;
-  const tb=document.getElementById('torchBtn');tb.style.display='none';tb.classList.remove('on');
-  showSheet('scanScrim','scanModal');
-  qr=new Html5Qrcode('reader');
+function scanConfig(){
   // Wide, responsive box suits 1D grocery barcodes; bigger frame = easier aim.
   const qbox=(vw,vh)=>{const w=Math.min(vw-24,360);return{width:w,height:Math.round(w*0.6)};};
-  const cfg={fps:15,qrbox:qbox,disableFlip:true,
+  return{fps:15,qrbox:qbox,disableFlip:true,
     experimentalFeatures:{useBarCodeDetectorIfSupported:true},
     formatsToSupport:[Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.EAN_8,
       Html5QrcodeSupportedFormats.UPC_A,Html5QrcodeSupportedFormats.UPC_E,
       Html5QrcodeSupportedFormats.UPC_EAN_EXTENSION,Html5QrcodeSupportedFormats.CODE_128]};
-  // High-res rear camera + continuous autofocus → much better on small/curved labels.
-  const cam={facingMode:'environment',width:{ideal:1920},height:{ideal:1080},
-    advanced:[{focusMode:'continuous'}]};
-  qr.start(cam,cfg,onScan,()=>{})
-    .then(()=>{try{const t=scanTrack();const caps=t&&t.getCapabilities?t.getCapabilities():null;
-      if(caps&&'torch'in caps&&caps.torch)tb.style.display='';}catch(e){}})
-    .catch(()=>{toast('Camera unavailable. Allow camera access.');closeScanner();});
+}
+function afterScanStart(){
+  try{const t=scanTrack();const caps=t&&t.getCapabilities?t.getCapabilities():null;
+    if(caps&&'torch'in caps&&caps.torch)document.getElementById('torchBtn').style.display='';}catch(e){}
+}
+function openScanner(){
+  torchOn=false;
+  const tb=document.getElementById('torchBtn');tb.style.display='none';tb.classList.remove('on');
+  showSheet('scanScrim','scanModal');
+  startScan(true);
+}
+// Try a high-res rear camera first; if the device rejects those constraints
+// (e.g. Safari is picky), fall back to the plain environment camera that always works.
+function startScan(hires){
+  qr=new Html5Qrcode('reader');
+  const cam=hires?{facingMode:'environment',width:{ideal:1920},height:{ideal:1080}}
+                 :{facingMode:'environment'};
+  qr.start(cam,scanConfig(),onScan,()=>{})
+    .then(afterScanStart)
+    .catch(()=>{ try{qr.clear();}catch(e){} qr=null;
+      if(hires){startScan(false);}
+      else{toast('Camera unavailable. Allow camera access.');closeScanner();} });
 }
 function toggleTorch(){const t=scanTrack();if(!t){toast('Torch not available');return;}
   const next=!torchOn;
@@ -1003,7 +1014,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v3.2 · 2026-06-28';
+const APP_VERSION='v3.3 · 2026-06-28';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
