@@ -593,10 +593,12 @@ function openPortion(food,editId,ex){
   pendingFood=food; editingId=editId||null;
   selectedMeal=ex?ex.meal:addMeal;
   const editing=!!editId, ps=!!food.ps, rmode=addTarget==='recipe';
+  const editIng=rmode&&ex;                                              // editing an existing recipe ingredient
   let unit,amt;
-  if(ps){unit='serv';amt=editing?+(ex.amount/(food.servingG||100)).toFixed(2):1;}
+  if(ps){unit='serv';amt=editIng?+ex.qty:(editing?+(ex.amount/(food.servingG||100)).toFixed(2):1);}
+  else if(editIng){unit='g';amt=ex.qty;}                                // prefill the ingredient's saved amount
   else if(editing){unit='g';amt=ex.amount;}
-  else if(rmode){unit='g';amt=food.servingG||100;}                      // recipe ingredients: weigh in grams
+  else if(rmode){unit='g';amt=food.servingG||100;}                      // new recipe ingredient: weigh in grams
   else {
     const lp=lastPortion[fkey(food)];                                   // remember last portion
     if(lp&&(lp.u==='g'||lp.u==='oz'||lp.u==='serv')){unit=lp.u;amt=lp.a;}
@@ -663,9 +665,10 @@ function confirmAdd(){
   if(addTarget==='recipe'){
     const item={name:pendingFood.name,brand:pendingFood.brand||'',b,
       qty:pendingFood.ps?+(g/(pendingFood.servingG||100)).toFixed(2):Math.round(g),ps:!!pendingFood.ps,sl:pendingFood.sl||''};
-    if(editIngIdx!=null&&recipeDraft.items[editIngIdx])recipeDraft.items[editIngIdx]=item;
+    const wasEdit=editIngIdx!=null&&recipeDraft.items[editIngIdx];
+    if(wasEdit)recipeDraft.items[editIngIdx]=item;
     else recipeDraft.items.push(item);
-    editIngIdx=null;hideSheet('addScrim','addSheet');closeModal();openRecipeBuilder();toast('Ingredient added');return;
+    editIngIdx=null;hideSheet('addScrim','addSheet');closeModal();openRecipeBuilder();toast(wasEdit?'Ingredient updated':'Ingredient added');return;
   }
   lastPortion[fkey(pendingFood)]={u:document.getElementById('unitSel').value,a:parseFloat(document.getElementById('amtInput').value)||0};
   LS.set('ct_lastportion',lastPortion);
@@ -821,7 +824,7 @@ function addIngredient(){addTarget='recipe';editIngIdx=null;addView='main';close
   setTimeout(()=>document.getElementById('addSearch').focus(),250);}
 function editIngredient(i){const it=recipeDraft.items[i];if(!it)return;
   addTarget='recipe';editIngIdx=i;closeAdd();
-  openPortion({name:it.name,brand:it.brand||'',cal:it.b.cal,p:it.b.p,c:it.b.c,f:it.b.f,servingG:it.b.g,sl:it.b.sl||it.sl,ps:it.ps});}
+  openPortion({name:it.name,brand:it.brand||'',cal:it.b.cal,p:it.b.p,c:it.b.c,f:it.b.f,servingG:it.b.g,sl:it.b.sl||it.sl,ps:it.ps},null,it);}
 function removeIngredient(i){recipeDraft.items.splice(i,1);openRecipeBuilder();}
 function saveRecipe(){const r=recipeDraft;
   r.name=(document.getElementById('rcName').value||'').trim();
@@ -1344,7 +1347,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v4.9 · 2026-06-28';
+const APP_VERSION='v5.0 · 2026-06-29';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
