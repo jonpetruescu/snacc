@@ -367,7 +367,7 @@ let weights=LS.get('ct_weights',{});   // dateKey -> kg (canonical)
 let wUnit=LS.get('ct_wunit','lb');     // display unit: 'lb' | 'kg'
 const MEALS=['Breakfast','Lunch','Dinner','Snacks'];
 const MICON={Breakfast:'🍳',Lunch:'🥗',Dinner:'🍝',Snacks:'🍎'};
-const reg={results:[],quick:[]};
+const reg={results:[],quick:[],saved:[],recent:[]};
 
 let LOCAL_FOODS=[];
 fetch('foods.json').then(r=>r.json()).then(d=>{
@@ -504,24 +504,20 @@ function closeAdd(){const backToRecipe=addTarget==='recipe'&&recipeDraft;
 
 function entryBase(e){if(e.b)return e.b;const a=e.amount||100,r=100/a;
   return{cal:Math.round(e.cal*r),p:+(e.p*r).toFixed(1),c:+(e.c*r).toFixed(1),f:+(e.f*r).toFixed(1),g:a};}
-function recentFoods(){
+// Everything you've logged, newest first, one card per distinct food.
+// Days are 'YYYY-MM-DD' so a plain reverse sort puts the newest day first;
+// within a day, entries are appended in order, so we walk them backwards.
+function recentFoods(limit){
   const out=[],seen=new Set();
   Object.keys(logs).sort().reverse().forEach(d=>{
     const es=logs[d]||[];
-    for(let i=es.length-1;i>=0;i--){const e=es[i],k=(e.name+'|'+(e.brand||'')).toLowerCase();
+    for(let i=es.length-1;i>=0;i--){const e=es[i];
+      if(e.quick)continue;                                   // quick-add calories aren't a re-loggable food
+      const k=(e.name+'|'+(e.brand||'')).toLowerCase();
       if(seen.has(k))continue;seen.add(k);const b=entryBase(e);
-      out.push({name:e.name,brand:e.brand||'',cal:b.cal,p:b.p,c:b.c,f:b.f,servingG:b.g,sl:b.sl,ps:b.ps});}
+      out.push({name:e.name,brand:e.brand||'',cal:b.cal,p:b.p,c:b.c,f:b.f,servingG:b.g,sl:b.sl,ps:b.ps,liq:b.liq});}
   });
-  return out.slice(0,15);
-}
-function freqFoods(){
-  const count={},sample={};
-  Object.values(logs).forEach(es=>(es||[]).forEach(e=>{
-    if(e.quick)return;const k=(e.name+'|'+(e.brand||'')).toLowerCase();
-    count[k]=(count[k]||0)+1;
-    if(!sample[k]){const b=entryBase(e);sample[k]={name:e.name,brand:e.brand||'',cal:b.cal,p:b.p,c:b.c,f:b.f,servingG:b.g,sl:b.sl,ps:b.ps};}
-  }));
-  return Object.keys(count).sort((a,b)=>count[b]-count[a]).map(k=>sample[k]);
+  return limit?out.slice(0,limit):out;
 }
 function recipeCard(r){const per=recipePer(r),n=(r.items||[]).length,sg=servG(r);
   const sub=sg>0?`${per.cal} kcal / ${Math.round(sg)} g serving · ${n} ingredient${n===1?'':'s'}`
@@ -545,10 +541,10 @@ function renderQuick(){
   }
   reg.saved=saved.slice(0,40);
   const savedKeys=new Set(saved.map(fkey));
-  reg.freq=freqFoods().filter(f=>!savedKeys.has(fkey(f))).slice(0,25);
+  reg.recent=recentFoods().filter(f=>!savedKeys.has(fkey(f)));
   let html='';
-  if(reg.saved.length) html+='<div class="sec-label">Saved</div>'+reg.saved.map((f,i)=>fcard(f,i,'saved')).join('');
-  if(reg.freq.length)  html+='<div class="sec-label">Frequent</div>'+reg.freq.map((f,i)=>fcard(f,i,'freq')).join('');
+  if(reg.saved.length)  html+='<div class="sec-label">Saved</div>'+reg.saved.map((f,i)=>fcard(f,i,'saved')).join('');
+  if(reg.recent.length) html+='<div class="sec-label">Recent</div>'+reg.recent.map((f,i)=>fcard(f,i,'recent')).join('');
   box.innerHTML=html||'<div class="empty">Search a food, scan a barcode,<br>or add a custom food.</div>';
 }
 function fcard(f,i,which){
@@ -708,6 +704,7 @@ function confirmAdd(){
   const b={cal:pendingFood.cal,p:pendingFood.p,c:pendingFood.c,f:pendingFood.f,g:pendingFood.servingG||100};
   if(pendingFood.sl)b.sl=pendingFood.sl;
   if(pendingFood.ps)b.ps=true;
+  if(pendingFood.liq!==undefined)b.liq=pendingFood.liq;   // keep tbsp/tsp available when re-logging
   if(addTarget==='recipe'){
     const item={name:pendingFood.name,brand:pendingFood.brand||'',b,
       qty:pendingFood.ps?+(g/(pendingFood.servingG||100)).toFixed(2):Math.round(g),ps:!!pendingFood.ps,sl:pendingFood.sl||''};
@@ -1462,7 +1459,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v5.4 · 2026-07-20';
+const APP_VERSION='v5.5 · 2026-07-20';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
