@@ -594,6 +594,7 @@ function openPortion(food,editId,ex){
   selectedMeal=ex?ex.meal:addMeal;
   const editing=!!editId, ps=!!food.ps, rmode=addTarget==='recipe';
   const editIng=rmode&&ex;                                              // editing an existing recipe ingredient
+  const spoon=!ps&&isSpoonable(food);                                   // liquids/spoonables also offer tbsp & tsp
   let unit,amt;
   if(ps){unit='serv';amt=editIng?+ex.qty:(editing?+(ex.amount/(food.servingG||100)).toFixed(2):1);}
   else if(editIng){unit='g';amt=ex.qty;}                                // prefill the ingredient's saved amount
@@ -601,7 +602,7 @@ function openPortion(food,editId,ex){
   else if(rmode){unit='g';amt=food.servingG||100;}                      // new recipe ingredient: weigh in grams
   else {
     const lp=lastPortion[fkey(food)];                                   // remember last portion
-    if(lp&&(lp.u==='g'||lp.u==='oz'||lp.u==='serv')){unit=lp.u;amt=lp.a;}
+    if(lp&&(lp.u==='g'||lp.u==='oz'||lp.u==='serv'||(spoon&&(lp.u==='tbsp'||lp.u==='tsp')))){unit=lp.u;amt=lp.a;}
     else {unit='serv';amt=1;}                                           // default to one serving
   }
   pUnit=unit;
@@ -628,6 +629,8 @@ function openPortion(food,editId,ex){
         <option value="serv" ${unit==='serv'?'selected':''}>${servOpt}</option>
         ${ps?'':`<option value="g" ${unit==='g'?'selected':''}>grams</option>`}
         ${ps?'':`<option value="oz" ${unit==='oz'?'selected':''}>oz</option>`}
+        ${(!ps&&spoon)?`<option value="tbsp" ${unit==='tbsp'?'selected':''}>tbsp</option>`:''}
+        ${(!ps&&spoon)?`<option value="tsp" ${unit==='tsp'?'selected':''}>tsp</option>`:''}
       </select></div>
     ${rmode?'':`<div class="seg" id="mealSeg">${MEALS.map(m=>`<button class="${m===selectedMeal?'on':''}" onclick="setMeal('${m}')">${m}</button>`).join('')}</div>`}
     <div class="m-actions">
@@ -639,10 +642,44 @@ function openPortion(food,editId,ex){
 }
 function backToBuilder(){closeModal();if(recipeDraft)openRecipeBuilder();}
 const OZ=28.3495;
-function unitToG(u){return u==='serv'?(pendingFood.servingG||100):u==='oz'?OZ:1;}
-function unitStep(u){return u==='serv'?0.5:u==='oz'?0.5:10;}
-function unitMin(u){return u==='serv'?0.25:u==='oz'?0.1:1;}
-function roundAmt(v,u){return u==='serv'?Math.round(v*4)/4:u==='oz'?Math.round(v*10)/10:Math.round(v);}
+/* ===== Volume units for liquids & spoonables =====
+   Tbsp/tsp only appear for foods we can convert: either the name matches a known
+   liquid/spoonable pattern (density in g per mL below) or the food is flagged liq:true. */
+const ML_TBSP=14.7868, ML_TSP=4.9289;
+const DENSITY=[
+  [/\b(canola|olive|vegetable|coconut|sesame|avocado|peanut|sunflower|grapeseed|cooking)?\s?oils?\b|\bghee\b|\blard\b|\btallow\b|\bshortening\b/,0.918],
+  [/honey|molasses|corn syrup|maple syrup|agave|condensed milk|caramel|chocolate syrup/,1.40],
+  [/\bsyrup\b|\bjam\b|\bjelly\b|preserves|marmalade|apple butter/,1.33],
+  [/peanut butter|almond butter|cashew butter|nut butter|sunflower butter|tahini|nutella|hazelnut spread|cookie butter/,1.06],
+  [/\bbutter\b|margarine/,0.96],
+  [/mayonnaise|\bmayo\b|aioli/,0.95],
+  [/yogurt|yoghurt|sour cream|creme fraiche|crème fraîche|cream cheese|hummus|guacamole|pesto|ricotta|cottage cheese|apple ?sauce|pudding|refried beans|tomato paste/,1.03],
+  [/heavy cream|whipping cream|half and half|half-and-half|\bcream\b|creamer|condensed/,1.00],
+  [/soy sauce|fish sauce|worcestershire|vinegar|hot sauce|sriracha|ketchup|catsup|bbq sauce|barbecue sauce|mustard|salsa|marinara|tomato sauce|pasta sauce|alfredo|teriyaki|hoisin|dressing|gravy|\bsauce\b|\bdip\b/,1.05],
+  [/juice|soda|cola|\bbeer\b|\bwine\b|liquor|vodka|whiskey|whisky|\brum\b|\bgin\b|tequila|kombucha|lemonade|iced tea|sports drink|energy drink|smoothie|\bshake\b|seltzer|\bcider\b/,1.03],
+  [/\bmilk\b|milkshake|buttermilk|\bcoffee\b|espresso|latte|\btea\b|\bwater\b|\bbroth\b|\bstock\b|\bsoup\b/,1.01],
+  [/egg white|liquid egg|beaten egg/,1.03]
+];
+/* Solid dishes that merely contain a liquid word ("butter chicken", "chocolate cake") — checked first. */
+const NOT_LIQUID=/\bcakes?\b|cookie|muffin|cupcake|brownie|bagel|sandwich|\bwraps?\b|\bsalad\b(?!\s*dressing)|\bchips\b|\bbars?\b|trail mix|\bchicken\b|\bbeef\b|\bsteak\b|\bpork\b|\btuna\b|\bsalmon\b|\bshrimp\b|spaghetti|\bpasta\b|fettuccine|lasagna|\bpizza\b(?!\s*sauce)|\bmelon\b|(dark|milk|white|semi.?sweet) chocolate|chocolate chip|ice cream|frozen yogurt|\bcereal\b|\bcandy\b|\bcups?\b|\bpie\b|donut|doughnut|\bcrackers?\b|\bbread\b|burrito|\btacos?\b|\bbowl\b|\bnuts?\b|\bseeds\b|\bfries\b|cream of wheat|oatmeal|\boats\b|\bcasserole\b/;
+function foodDensity(f){
+  if(!f)return 0;
+  if(f.liq===false)return 0;                                  // user marked it solid
+  const n=((f.name||'')+' '+(f.brand||'')).toLowerCase();
+  if(!f.liq&&NOT_LIQUID.test(n))return 0;
+  for(const [re,d] of DENSITY)if(re.test(n))return d;
+  return f.liq?1.0:0;                                         // flagged liquid, density unknown → assume water
+}
+function isSpoonable(f){return foodDensity(f)>0;}
+const VOL={tbsp:ML_TBSP,tsp:ML_TSP};
+function unitToG(u){
+  if(u==='serv')return pendingFood.servingG||100;
+  if(u==='oz')return OZ;
+  if(VOL[u])return VOL[u]*foodDensity(pendingFood);
+  return 1;}
+function unitStep(u){return u==='tsp'?0.5:(u==='serv'||u==='oz'||u==='tbsp')?0.5:10;}
+function unitMin(u){return u==='serv'?0.25:u==='oz'?0.1:VOL[u]?0.25:1;}
+function roundAmt(v,u){return (u==='serv'||VOL[u])?Math.round(v*4)/4:u==='oz'?Math.round(v*10)/10:Math.round(v);}
 function curGrams(){const v=parseFloat(document.getElementById('amtInput').value)||0;
   return v*unitToG(document.getElementById('unitSel').value);}
 function updMacros(){const m=calcMacros(pendingFood,curGrams());
@@ -735,16 +772,21 @@ function openCustomForm(){
     <div class="grab"></div>
     <h3>Custom food</h3>
     <div class="msub">Enter nutrition for one serving — it saves & becomes searchable.</div>
-    <div class="row"><label>Name</label><input id="cfName" type="text" value="${esc(pre)}" placeholder="e.g. Mom's chili" style="text-align:left"></div>
+    <div class="row"><label>Name</label><input id="cfName" type="text" value="${esc(pre)}" placeholder="e.g. Mom's chili" style="text-align:left" oninput="cfGuessLiq()"></div>
     <div class="row"><label>Serving g</label><input id="cfServ" type="number" inputmode="decimal" value="100"></div>
     <div class="row"><label>Calories</label><input id="cfCal" type="number" inputmode="decimal" placeholder="per serving"></div>
     <div class="row"><label>Protein g</label><input id="cfP" type="number" inputmode="decimal" placeholder="per serving"></div>
     <div class="row"><label>Carbs g</label><input id="cfC" type="number" inputmode="decimal" placeholder="per serving"></div>
     <div class="row"><label>Fat g</label><input id="cfF" type="number" inputmode="decimal" placeholder="per serving"></div>
+    <label class="row" style="cursor:pointer"><input id="cfLiq" type="checkbox" ${isSpoonable({name:pre})?'checked':''} onchange="this.dataset.touched=1" style="flex:0 0 20px;width:20px;height:20px;accent-color:var(--accent)">
+      <span style="font-size:14px;color:var(--muted);width:auto">Liquid or spoonable — also measure in tbsp / tsp</span></label>
     <div class="m-actions"><button class="cancel" onclick="closeModal()">Cancel</button>
       <button class="save" onclick="saveCustomFood()">Save</button></div>`;
   showSheet('modalScrim','modal');
 }
+// Keep the liquid checkbox in sync with the name until the user sets it themselves.
+function cfGuessLiq(){const b=document.getElementById('cfLiq');if(!b||b.dataset.touched)return;
+  b.checked=isSpoonable({name:document.getElementById('cfName').value});}
 function saveCustomFood(){
   const name=document.getElementById('cfName').value.trim();
   const serv=parseFloat(document.getElementById('cfServ').value)||100;
@@ -755,7 +797,8 @@ function saveCustomFood(){
   if(!name){toast('Enter a name');return;}
   if(cal<=0){toast('Enter calories');return;}
   const r=100/serv;
-  const food={name,brand:'',cal:Math.round(cal*r),p:+(p*r).toFixed(1),c:+(c*r).toFixed(1),f:+(f*r).toFixed(1),servingG:Math.round(serv)};
+  const food={name,brand:'',cal:Math.round(cal*r),p:+(p*r).toFixed(1),c:+(c*r).toFixed(1),f:+(f*r).toFixed(1),servingG:Math.round(serv),
+    liq:!!document.getElementById('cfLiq').checked};
   saved.unshift(food);saveAll();toast('Custom food saved');
   openPortion({...food});
 }
@@ -1259,6 +1302,8 @@ function openLabelReview(g){
     <div class="row"><label>Protein g</label><input id="lbP" type="number" inputmode="decimal" value="${(+g.protein)||''}" placeholder="per serving"></div>
     <div class="row"><label>Carbs g</label><input id="lbC" type="number" inputmode="decimal" value="${(+g.carbs)||''}" placeholder="per serving"></div>
     <div class="row"><label>Fat g</label><input id="lbF" type="number" inputmode="decimal" value="${(+g.fat)||''}" placeholder="per serving"></div>
+    <label class="row" style="cursor:pointer"><input id="lbLiq" type="checkbox" ${isSpoonable({name:g.name||'',brand:g.brand||''})?'checked':''} style="flex:0 0 20px;width:20px;height:20px;accent-color:var(--accent)">
+      <span style="font-size:14px;color:var(--muted);width:auto">Liquid or spoonable — also measure in tbsp / tsp</span></label>
     <div class="m-actions"><button class="cancel" onclick="document.getElementById('labelCam').click()">📷 Retake</button>
       <button class="save" onclick="saveLabelFood()">Save</button></div>
     <div style="text-align:center;margin-top:12px"><button class="goal-edit" onclick="closeModal()">Cancel</button></div>`;
@@ -1286,8 +1331,9 @@ function saveLabelFood(){
     food={name,brand,cal:Math.round(cal),p:+p.toFixed(1),c:+c.toFixed(1),f:+f.toFixed(1),
       servingG:100,sl:sl||'serving',ps:true,code:pendingLabelCode};
   }
+  if(document.getElementById('lbLiq').checked)food.liq=true;
   if(pendingLabelCode){barcache[pendingLabelCode]=food;LS.set('ct_barcache',barcache);}
-  const proj={name:food.name,brand:food.brand,cal:food.cal,p:food.p,c:food.c,f:food.f,servingG:food.servingG,sl:food.sl,ps:food.ps};
+  const proj={name:food.name,brand:food.brand,cal:food.cal,p:food.p,c:food.c,f:food.f,servingG:food.servingG,sl:food.sl,ps:food.ps,liq:food.liq};
   if(!saved.some(s=>fkey(s)===fkey(food)))saved.unshift(proj);
   saveAll();
   toast(pendingLabelCode?'Saved — future scans are instant':'Saved');
@@ -1347,7 +1393,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v5.0 · 2026-06-29';
+const APP_VERSION='v5.1 · 2026-07-20';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
