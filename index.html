@@ -787,7 +787,16 @@ function openCustomForm(){
     <h3>Custom food</h3>
     <div class="msub">Enter nutrition for one serving — it saves & becomes searchable.</div>
     <div class="row"><label>Name</label><input id="cfName" type="text" value="${esc(pre)}" placeholder="e.g. Mom's chili" style="text-align:left" oninput="cfGuessLiq()"></div>
-    <div class="row"><label>Serving g</label><input id="cfServ" type="number" inputmode="decimal" value="100"></div>
+    <div class="row"><label>Serving</label>
+      <input id="cfServ" type="number" inputmode="decimal" value="100" style="flex:0 0 90px" oninput="cfServCalc()">
+      <select id="cfServU" onchange="cfUnitChange()">
+        <option value="g">grams</option><option value="oz">oz</option>
+        <option value="tbsp">tbsp</option><option value="tsp">tsp</option>
+        <option value="cup">cup</option><option value="floz">fl oz</option><option value="ml">mL</option>
+        <option value="piece">piece / item</option></select></div>
+    <div class="row" id="cfGramRow" style="display:none"><label>Weight g</label>
+      <input id="cfGram" type="number" inputmode="decimal" placeholder="grams in one serving" oninput="this.dataset.touched=1;cfHintText()"></div>
+    <div class="msub" id="cfHint" style="display:none;margin:-8px 0 12px"></div>
     <div class="row"><label>Calories</label><input id="cfCal" type="number" inputmode="decimal" placeholder="per serving"></div>
     <div class="row"><label>Protein g</label><input id="cfP" type="number" inputmode="decimal" placeholder="per serving"></div>
     <div class="row"><label>Carbs g</label><input id="cfC" type="number" inputmode="decimal" placeholder="per serving"></div>
@@ -796,23 +805,62 @@ function openCustomForm(){
       <span style="font-size:14px;color:var(--muted);width:auto">Liquid or spoonable — also measure in tbsp / tsp</span></label>
     <div class="m-actions"><button class="cancel" onclick="closeModal()">Cancel</button>
       <button class="save" onclick="saveCustomFood()">Save</button></div>`;
+  cfServCalc();
   showSheet('modalScrim','modal');
 }
-// Keep the liquid checkbox in sync with the name until the user sets it themselves.
-function cfGuessLiq(){const b=document.getElementById('cfLiq');if(!b||b.dataset.touched)return;
-  b.checked=isSpoonable({name:document.getElementById('cfName').value});}
+/* --- Custom food: serving unit handling --- */
+const CF_ML={tbsp:ML_TBSP,tsp:ML_TSP,cup:236.588,floz:29.5735,ml:1};   // mL per unit
+function cfEl(id){return document.getElementById(id);}
+function cfDensity(){return foodDensity({name:cfEl('cfName').value,liq:cfEl('cfLiq').checked})||1.0;}
+function cfServLabel(a,u){
+  if(u==='g')return '';
+  if(u==='piece')return a+' '+(a===1?'piece':'pieces');
+  if(u==='cup')return a+' '+(a===1?'cup':'cups');
+  if(u==='floz')return a+' fl oz';
+  if(u==='ml')return a+' mL';
+  return a+' '+u;                                                      // oz, tbsp, tsp
+}
+// Volume servings imply a spoonable food, so tick the liquid box unless you've set it yourself.
+function cfUnitChange(){const b=cfEl('cfLiq');
+  if(CF_ML[cfEl('cfServU').value]&&!b.dataset.touched)b.checked=true;
+  cfServCalc();}
+// Keep the liquid checkbox in sync with the name until you set it yourself.
+function cfGuessLiq(){const b=cfEl('cfLiq');
+  if(b&&!b.dataset.touched)b.checked=CF_ML[cfEl('cfServU').value]?true:isSpoonable({name:cfEl('cfName').value});
+  cfServCalc();}
+function cfServCalc(){
+  const u=cfEl('cfServU').value, a=parseFloat(cfEl('cfServ').value)||0, gr=cfEl('cfGram');
+  cfEl('cfGramRow').style.display=(u==='g'||u==='oz')?'none':'';
+  if(CF_ML[u]&&!gr.dataset.touched)gr.value=+(a*CF_ML[u]*cfDensity()).toFixed(1);
+  cfHintText();}
+function cfHintText(){
+  const u=cfEl('cfServU').value, h=cfEl('cfHint'), g=parseFloat(cfEl('cfGram').value)||0;
+  if(CF_ML[u]) h.textContent=`≈ ${g} g per serving, estimated from volume — correct it if your label prints a gram weight.`;
+  else if(u==='piece') h.textContent=g>0?`One serving = ${g} g.`:'Weight optional — leave blank to log this by the piece.';
+  h.style.display=(CF_ML[u]||u==='piece')?'':'none';}
 function saveCustomFood(){
-  const name=document.getElementById('cfName').value.trim();
-  const serv=parseFloat(document.getElementById('cfServ').value)||100;
-  const cal=parseFloat(document.getElementById('cfCal').value)||0;
-  const p=parseFloat(document.getElementById('cfP').value)||0;
-  const c=parseFloat(document.getElementById('cfC').value)||0;
-  const f=parseFloat(document.getElementById('cfF').value)||0;
+  const name=cfEl('cfName').value.trim();
+  const u=cfEl('cfServU').value, amt=parseFloat(cfEl('cfServ').value)||0;
+  const cal=parseFloat(cfEl('cfCal').value)||0;
+  const p=parseFloat(cfEl('cfP').value)||0;
+  const c=parseFloat(cfEl('cfC').value)||0;
+  const f=parseFloat(cfEl('cfF').value)||0;
   if(!name){toast('Enter a name');return;}
+  if(amt<=0){toast('Enter a serving size');return;}
   if(cal<=0){toast('Enter calories');return;}
-  const r=100/serv;
-  const food={name,brand:'',cal:Math.round(cal*r),p:+(p*r).toFixed(1),c:+(c*r).toFixed(1),f:+(f*r).toFixed(1),servingG:Math.round(serv),
-    liq:!!document.getElementById('cfLiq').checked};
+  const liq=!!cfEl('cfLiq').checked, sl=cfServLabel(amt,u);
+  // Weight units are exact; volume is converted via density; a piece may have no weight at all.
+  const serv=u==='g'?amt:u==='oz'?amt*OZ:(parseFloat(cfEl('cfGram').value)||0);
+  let food;
+  if(serv>0){
+    const r=100/serv;
+    food={name,brand:'',cal:Math.round(cal*r),p:+(p*r).toFixed(1),c:+(c*r).toFixed(1),f:+(f*r).toFixed(1),
+      servingG:+serv.toFixed(1),sl,liq};
+  }else{
+    // No weight → per-serving food, logged by the serving rather than by grams.
+    food={name,brand:'',cal:Math.round(cal),p:+p.toFixed(1),c:+c.toFixed(1),f:+f.toFixed(1),
+      servingG:100,sl:sl||'serving',ps:true,liq};
+  }
   // Goes in your food library (searchable), not the starred list — star it from the portion screen if you want it pinned.
   const i=mine.findIndex(m=>fkey(m)===fkey(food));
   if(i>=0)mine[i]=food; else mine.unshift(food);
@@ -1412,7 +1460,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v5.2 · 2026-07-20';
+const APP_VERSION='v5.3 · 2026-07-20';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
