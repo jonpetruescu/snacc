@@ -220,7 +220,9 @@
   .step{flex:0 0 40px;height:40px;border-radius:10px;background:var(--card2);color:var(--text);
     font-size:21px;font-weight:600;display:flex;align-items:center;justify-content:center}
   .step:active{background:var(--line)}
-  .row select{flex:1;background:var(--card2);border:1px solid var(--line);border-radius:11px;padding:12px;color:var(--text);font-size:15px;outline:none}
+  .row select{flex:1;min-width:0;background:var(--card2);border:1px solid var(--line);border-radius:11px;padding:12px;color:var(--text);font-size:15px;outline:none}
+  /* Serving row: narrow number box so the unit dropdown always fits on a phone. */
+  .row input.qty{flex:0 0 68px;min-width:0;padding:12px 6px}
   .row .gg{flex:0 0 56px;text-align:right;font-size:14px;font-weight:700;color:var(--accent)}
   .gtot{text-align:center;font-size:13px;font-weight:600;margin:2px 0 16px}
   .seg{display:flex;gap:6px;margin-bottom:18px}
@@ -788,12 +790,12 @@ function openCustomForm(){
     <div class="msub">Enter nutrition for one serving — it saves & becomes searchable.</div>
     <div class="row"><label>Name</label><input id="cfName" type="text" value="${esc(pre)}" placeholder="e.g. Mom's chili" style="text-align:left" oninput="cfGuessLiq()"></div>
     <div class="row"><label>Serving</label>
-      <input id="cfServ" type="number" inputmode="decimal" value="100" style="flex:0 0 90px" oninput="cfServCalc()">
+      <input id="cfServ" class="qty" type="number" inputmode="decimal" value="100" oninput="cfServCalc()">
       <select id="cfServU" onchange="cfUnitChange()">
         <option value="g">grams</option><option value="oz">oz</option>
         <option value="tbsp">tbsp</option><option value="tsp">tsp</option>
         <option value="cup">cup</option><option value="floz">fl oz</option><option value="ml">mL</option>
-        <option value="piece">piece / item</option></select></div>
+        <option value="piece">piece</option></select></div>
     <div class="row" id="cfGramRow" style="display:none"><label>Weight g</label>
       <input id="cfGram" type="number" inputmode="decimal" placeholder="grams in one serving" oninput="this.dataset.touched=1;cfHintText()"></div>
     <div class="msub" id="cfHint" style="display:none;margin:-8px 0 12px"></div>
@@ -1460,7 +1462,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v5.3 · 2026-07-20';
+const APP_VERSION='v5.4 · 2026-07-20';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
