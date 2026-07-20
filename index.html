@@ -352,7 +352,8 @@
 const LS={ get(k,d){try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},
   set(k,v){localStorage.setItem(k,JSON.stringify(v))} };
 let goals=LS.get('ct_goals',{cal:2000,pPct:40,cPct:30,fPct:30,p:200,c:150,f:67});
-let saved=LS.get('ct_saved',[]);
+let saved=LS.get('ct_saved',[]);       // starred foods — pinned to the top of the Add screen
+let mine =LS.get('ct_mine',[]);        // custom + scanned foods — searchable library, starred only if you star them
 let logs =LS.get('ct_logs',{});
 let curDate=todayKey();
 let pendingFood=null, selectedMeal='Snacks', addMeal='Snacks', editingId=null;
@@ -373,7 +374,7 @@ fetch('foods.json').then(r=>r.json()).then(d=>{
 
 function dateKey(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function todayKey(){return dateKey(new Date());}
-function saveAll(){LS.set('ct_goals',goals);LS.set('ct_saved',saved);LS.set('ct_logs',logs);LS.set('ct_recipes',recipes);LS.set('ct_weights',weights);LS.set('ct_wunit',wUnit);}
+function saveAll(){LS.set('ct_goals',goals);LS.set('ct_saved',saved);LS.set('ct_mine',mine);LS.set('ct_logs',logs);LS.set('ct_recipes',recipes);LS.set('ct_weights',weights);LS.set('ct_wunit',wUnit);}
 function calcMacros(f,g){const r=g/100;return{cal:Math.round(f.cal*r),p:+(f.p*r).toFixed(1),c:+(f.c*r).toFixed(1),f:+(f.f*r).toFixed(1)};}
 function gG(cal,pct,k){return Math.round((+cal||0)*(+pct||0)/100/k);}  // grams from % of calories (k=kcal/g)
 function normalizeGoals(){ if(goals.pPct==null){const cal=goals.cal||2000;
@@ -561,9 +562,15 @@ function pick(which,i){openPortion({...reg[which][i]});}
 /* ===== Search ===== */
 let searchSeq=0, searchTimer=null;
 function localSearch(q){const t=q.toLowerCase();
-  const hits=saved.concat(LOCAL_FOODS).filter(f=>f.name.toLowerCase().includes(t));
-  hits.sort((a,b)=>{const aw=a.name.toLowerCase().startsWith(t)?0:1,bw=b.name.toLowerCase().startsWith(t)?0:1;
-    return aw-bw||a.name.length-b.name.length;});
+  // Your own foods (custom + scanned) and starred foods rank above the built-in database.
+  const seen=new Set(), hits=[];
+  mine.concat(saved,LOCAL_FOODS).forEach(f=>{
+    if(!f.name.toLowerCase().includes(t))return;
+    const k=fkey(f);if(seen.has(k))return;seen.add(k);hits.push(f);});
+  const isOwn=f=>mine.some(m=>fkey(m)===fkey(f));
+  hits.sort((a,b)=>{const ao=isOwn(a)?0:1,bo=isOwn(b)?0:1;
+    const aw=a.name.toLowerCase().startsWith(t)?0:1,bw=b.name.toLowerCase().startsWith(t)?0:1;
+    return ao-bo||aw-bw||a.name.length-b.name.length;});
   return hits.slice(0,40);}
 function onSearchInput(){
   const q=document.getElementById('addSearch').value.trim();
@@ -724,8 +731,15 @@ function confirmAdd(){
   if(!document.getElementById('addSheet').classList.contains('show'))closeAdd();
 }
 function toggleSave(){const f=pendingFood,i=saved.findIndex(s=>fkey(s)===fkey(f)),btn=document.getElementById('starBtn');
-  if(i>=0){saved.splice(i,1);btn.classList.remove('on');toast('Unsaved');}
-  else{saved.unshift({name:f.name,brand:f.brand||'',cal:f.cal,p:f.p,c:f.c,f:f.f,servingG:f.servingG||null});btn.classList.add('on');toast('Saved');}
+  if(i>=0){
+    // Unstarring must never lose a food that exists nowhere else — if it isn't in the
+    // built-in database or your library already, keep it in your library so search finds it.
+    const known=LOCAL_FOODS.some(x=>fkey(x)===fkey(f))||mine.some(m=>fkey(m)===fkey(f));
+    if(!known)mine.unshift({...saved[i]});
+    saved.splice(i,1);btn.classList.remove('on');toast('Unstarred');
+  }
+  else{saved.unshift({name:f.name,brand:f.brand||'',cal:f.cal,p:f.p,c:f.c,f:f.f,servingG:f.servingG||null,
+    sl:f.sl||'',ps:!!f.ps,liq:f.liq});btn.classList.add('on');toast('Starred');}
   saveAll();}
 function closeModal(){hideSheet('modalScrim','modal');pendingFood=null;editingId=null;}
 function openEditEntry(id){
@@ -799,7 +813,10 @@ function saveCustomFood(){
   const r=100/serv;
   const food={name,brand:'',cal:Math.round(cal*r),p:+(p*r).toFixed(1),c:+(c*r).toFixed(1),f:+(f*r).toFixed(1),servingG:Math.round(serv),
     liq:!!document.getElementById('cfLiq').checked};
-  saved.unshift(food);saveAll();toast('Custom food saved');
+  // Goes in your food library (searchable), not the starred list — star it from the portion screen if you want it pinned.
+  const i=mine.findIndex(m=>fkey(m)===fkey(food));
+  if(i>=0)mine[i]=food; else mine.unshift(food);
+  saveAll();toast('Custom food saved');
   openPortion({...food});
 }
 
@@ -1130,7 +1147,7 @@ function renderVer(){
 }
 async function backupNow(silent){
   const cfg=LS.get('ct_gh',null);if(!cfg||!cfg.token||!cfg.owner||!cfg.repo)return;
-  const data=JSON.stringify({goals,saved,logs,barcache,recipes,weights,wUnit});
+  const data=JSON.stringify({goals,saved,mine,logs,barcache,recipes,weights,wUnit});
   if(silent&&data===LS.get('ct_lastpayload',''))return;        // nothing changed → skip
   const url=`https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/snacc-backup.json`;
   const headers={Authorization:'Bearer '+cfg.token,Accept:'application/vnd.github+json'};
@@ -1155,6 +1172,7 @@ async function restoreNow(){
     if(g.status!==200){toast(g.status===404?'No backup found in that repo':'Restore failed ('+g.status+')');return;}
     const data=JSON.parse(b64d((await g.json()).content));
     if(data.goals)goals=data.goals;if(data.saved)saved=data.saved;if(data.logs)logs=data.logs;
+    if(data.mine)mine=data.mine;
     if(data.recipes)recipes=data.recipes;
     if(data.weights)weights=data.weights;
     if(data.wUnit)wUnit=data.wUnit;
@@ -1163,7 +1181,7 @@ async function restoreNow(){
     // Save creds for future auto-backups, and mark this exact state as already-backed-up
     // so the auto-backup on next open doesn't redundantly re-push.
     LS.set('ct_gh',{owner:cfg.owner,repo:cfg.repo,token:cfg.token});
-    LS.set('ct_lastpayload',JSON.stringify({goals,saved,logs,barcache}));
+    LS.set('ct_lastpayload',JSON.stringify({goals,saved,mine,logs,barcache,recipes,weights,wUnit}));
     LS.set('ct_lastbackup',Date.now());LS.set('ct_bkfail',0);
     closeModal();refresh();toast('Restored ✓');
   }catch(e){toast('Restore failed');}
@@ -1334,7 +1352,8 @@ function saveLabelFood(){
   if(document.getElementById('lbLiq').checked)food.liq=true;
   if(pendingLabelCode){barcache[pendingLabelCode]=food;LS.set('ct_barcache',barcache);}
   const proj={name:food.name,brand:food.brand,cal:food.cal,p:food.p,c:food.c,f:food.f,servingG:food.servingG,sl:food.sl,ps:food.ps,liq:food.liq};
-  if(!saved.some(s=>fkey(s)===fkey(food)))saved.unshift(proj);
+  const mi=mine.findIndex(m=>fkey(m)===fkey(food));
+  if(mi>=0)mine[mi]=proj; else mine.unshift(proj);
   saveAll();
   toast(pendingLabelCode?'Saved — future scans are instant':'Saved');
   pendingLabelCode='';
@@ -1393,7 +1412,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v5.1 · 2026-07-20';
+const APP_VERSION='v5.2 · 2026-07-20';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
