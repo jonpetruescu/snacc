@@ -428,6 +428,10 @@ function entryAmtLabel(e){
   if(e.quick)return '';
   const b=e.b;
   if(b&&b.ps){const n=+(e.amount/(b.g||100)).toFixed(2),lbl=esc(b.sl||'serving');return (n===1?lbl:n+' × '+lbl)+' · ';}
+  if(e.u==='ml'){                                        // logged by volume → show it back in mL
+    const d=foodDensity({name:e.name,brand:e.brand,liq:b?b.liq:undefined});
+    if(d>0)return Math.round(e.amount/d)+' mL · ';
+  }
   return e.amount+' g · ';
 }
 function prevDayWith(pred){const ks=Object.keys(logs).filter(k=>k<curDate).sort().reverse();
@@ -603,11 +607,12 @@ function openPortion(food,editId,ex){
   let unit,amt;
   if(ps){unit='serv';amt=editIng?+ex.qty:(editing?+(ex.amount/(food.servingG||100)).toFixed(2):1);}
   else if(editIng){unit='g';amt=ex.qty;}                                // prefill the ingredient's saved amount
+  else if(editing&&ex.u==='ml'&&spoon){unit='ml';amt=Math.round(ex.amount/foodDensity(food));}
   else if(editing){unit='g';amt=ex.amount;}
   else if(rmode){unit='g';amt=food.servingG||100;}                      // new recipe ingredient: weigh in grams
   else {
     const lp=lastPortion[fkey(food)];                                   // remember last portion
-    if(lp&&(lp.u==='g'||lp.u==='oz'||lp.u==='serv'||(spoon&&(lp.u==='tbsp'||lp.u==='tsp')))){unit=lp.u;amt=lp.a;}
+    if(lp&&(lp.u==='g'||lp.u==='oz'||lp.u==='serv'||(spoon&&(lp.u==='ml'||lp.u==='tbsp'||lp.u==='tsp')))){unit=lp.u;amt=lp.a;}
     else {unit='serv';amt=1;}                                           // default to one serving
   }
   pUnit=unit;
@@ -634,6 +639,7 @@ function openPortion(food,editId,ex){
         <option value="serv" ${unit==='serv'?'selected':''}>${servOpt}</option>
         ${ps?'':`<option value="g" ${unit==='g'?'selected':''}>grams</option>`}
         ${ps?'':`<option value="oz" ${unit==='oz'?'selected':''}>oz</option>`}
+        ${(!ps&&spoon)?`<option value="ml" ${unit==='ml'?'selected':''}>mL</option>`:''}
         ${(!ps&&spoon)?`<option value="tbsp" ${unit==='tbsp'?'selected':''}>tbsp</option>`:''}
         ${(!ps&&spoon)?`<option value="tsp" ${unit==='tsp'?'selected':''}>tsp</option>`:''}
       </select></div>
@@ -676,15 +682,15 @@ function foodDensity(f){
   return f.liq?1.0:0;                                         // flagged liquid, density unknown → assume water
 }
 function isSpoonable(f){return foodDensity(f)>0;}
-const VOL={tbsp:ML_TBSP,tsp:ML_TSP};
+const VOL={ml:1,tbsp:ML_TBSP,tsp:ML_TSP};
 function unitToG(u){
   if(u==='serv')return pendingFood.servingG||100;
   if(u==='oz')return OZ;
   if(VOL[u])return VOL[u]*foodDensity(pendingFood);
   return 1;}
-function unitStep(u){return u==='tsp'?0.5:(u==='serv'||u==='oz'||u==='tbsp')?0.5:10;}
-function unitMin(u){return u==='serv'?0.25:u==='oz'?0.1:VOL[u]?0.25:1;}
-function roundAmt(v,u){return (u==='serv'||VOL[u])?Math.round(v*4)/4:u==='oz'?Math.round(v*10)/10:Math.round(v);}
+function unitStep(u){return u==='ml'?50:u==='tsp'?0.5:(u==='serv'||u==='oz'||u==='tbsp')?0.5:10;}
+function unitMin(u){return u==='serv'?0.25:u==='oz'?0.1:u==='ml'?1:VOL[u]?0.25:1;}
+function roundAmt(v,u){return u==='ml'?Math.round(v):(u==='serv'||VOL[u])?Math.round(v*4)/4:u==='oz'?Math.round(v*10)/10:Math.round(v);}
 function curGrams(){const v=parseFloat(document.getElementById('amtInput').value)||0;
   return v*unitToG(document.getElementById('unitSel').value);}
 function updMacros(){const m=calcMacros(pendingFood,curGrams());
@@ -717,11 +723,13 @@ function confirmAdd(){
   LS.set('ct_lastportion',lastPortion);
   if(editingId){
     const e=(logs[curDate]||[]).find(x=>x.id===editingId);
-    if(e){e.meal=selectedMeal;e.amount=Math.round(g);e.cal=m.cal;e.p=m.p;e.c=m.c;e.f=m.f;e.b=b;delete e.quick;}
+    if(e){e.meal=selectedMeal;e.amount=Math.round(g);e.cal=m.cal;e.p=m.p;e.c=m.c;e.f=m.f;e.b=b;delete e.quick;
+      if(pUnit==='ml')e.u='ml';else delete e.u;}
     saveAll();closeModal();refresh();toast('Updated');return;
   }
   const entry={id:Date.now()+''+Math.random().toString(36).slice(2,6),name:pendingFood.name,brand:pendingFood.brand||'',
     meal:selectedMeal,amount:Math.round(g),cal:m.cal,p:m.p,c:m.c,f:m.f,b};
+  if(pUnit==='ml')entry.u='ml';                          // remember volume logging for the diary label
   (logs[curDate]=logs[curDate]||[]).push(entry);saveAll();
   // Multi-add: keep the add sheet open so several foods can be logged in a row.
   addedCount++;closeModal();refresh();
@@ -1459,7 +1467,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v5.5 · 2026-07-20';
+const APP_VERSION='v5.6 · 2026-07-21';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
