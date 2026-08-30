@@ -174,6 +174,8 @@
   .fcard .fp::after{width:2.6px;height:13px;transform:translate(-50%,-50%)}
   .fcard .fedit{flex:0 0 auto;width:40px;height:40px;border-radius:12px;background:var(--card2);
     color:var(--accent);font-size:19px;display:flex;align-items:center;justify-content:center}
+  .fcard .fdel{flex:0 0 auto;width:34px;height:34px;border-radius:11px;background:transparent;
+    color:#5d6475;font-size:15px;display:flex;align-items:center;justify-content:center}
   .fstar{color:var(--amber);font-size:12px;margin-right:5px;vertical-align:1px}
   .addback{display:inline-flex;align-items:center;gap:4px;color:var(--accent);font-weight:700;
     font-size:15px;padding:6px 2px;margin:2px 0 2px}
@@ -234,6 +236,7 @@
   .m-actions .save{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#2a1400}
   .m-actions .star{flex:0 0 52px;background:var(--card2);font-size:20px;color:var(--muted)}
   .m-actions .star.on{color:var(--amber)}
+  .m-actions .mini{flex:0 0 52px;background:var(--card2);font-size:19px;color:var(--accent)}
   .m-actions .torch{flex:0 0 auto;padding:14px 18px;background:var(--card2);color:var(--text)}
   .m-actions .torch.on{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#2a1400}
 
@@ -296,12 +299,18 @@
   <div class="page-body" id="recipesList"></div>
 </section>
 
+<section class="page" id="pageFoods">
+  <div class="page-h">My foods<button class="page-new" onclick="newCustomFood()">＋ New</button></div>
+  <div class="page-body" id="foodsList"></div>
+</section>
+
 </div><!-- /pager -->
 
 <div class="dots" id="dots">
   <span class="dot on" onclick="goToPage(0)"></span>
   <span class="dot" onclick="goToPage(1)"></span>
   <span class="dot" onclick="goToPage(2)"></span>
+  <span class="dot" onclick="goToPage(3)"></span>
 </div>
 
 <!-- Add sheet -->
@@ -362,6 +371,7 @@ let pendingFood=null, selectedMeal='Snacks', addMeal='Snacks', editingId=null;
 let barcache=LS.get('ct_barcache',{});
 let recipes=LS.get('ct_recipes',[]);
 let recipeDraft=null, addTarget='log', editIngIdx=null, addView='main', pUnit='g', addedCount=0;
+let editFoodIdx=null;                  // index into `mine` while its edit form is open
 let lastPortion=LS.get('ct_lastportion',{});   // fkey -> {u:unit, a:amount}
 let weights=LS.get('ct_weights',{});   // dateKey -> kg (canonical)
 let wUnit=LS.get('ct_wunit','lb');     // display unit: 'lb' | 'kg'
@@ -451,7 +461,7 @@ function renderDiary(){
   let html='';
   const everLogged=Object.values(logs).some(a=>a&&a.length);
   if(!everLogged){
-    html+=`<div class="welcome">👋 Welcome to Snacc<span>Tap ＋ on a meal below to log your first food. Swipe left for Insights and Recipes, or tap the dots at the bottom.</span></div>`;
+    html+=`<div class="welcome">👋 Welcome to Snacc<span>Tap ＋ on a meal below to log your first food. Swipe left for Insights, Recipes and My foods, or tap the dots at the bottom.</span></div>`;
   } else if(!entries.length){const src=prevDayWith(()=>true);
     if(src)html+=`<button class="copyday" onclick="copyDay()">📋 Copy everything from ${fmtDate(src)}</button>`;}
   MEALS.forEach(meal=>{
@@ -622,6 +632,7 @@ function openPortion(food,editId,ex){
   const servOpt='serving'+(ps?(slClean?` (${esc(slClean)})`:''):(food.servingG?` (${food.sl?esc(food.sl)+', ':''}${food.servingG} g)`:''));
   const servCal=ps?food.cal:calcMacros(food,food.servingG||100).cal;
   const isSaved=saved.some(s=>fkey(s)===fkey(food));
+  const canEdit=!rmode&&!editing&&isMine(food);   // your own foods are editable; a logged entry edits the entry, not the food
   document.getElementById('modal').innerHTML=`
     <div class="grab"></div>
     <h3>${esc(food.name)}</h3>
@@ -646,6 +657,7 @@ function openPortion(food,editId,ex){
     ${rmode?'':`<div class="seg" id="mealSeg">${MEALS.map(m=>`<button class="${m===selectedMeal?'on':''}" onclick="setMeal('${m}')">${m}</button>`).join('')}</div>`}
     <div class="m-actions">
       ${rmode?'':`<button class="star ${isSaved?'on':''}" id="starBtn" onclick="toggleSave()">★</button>`}
+      ${canEdit?`<button class="mini" onclick="editThisFood()" title="Edit this food">✎</button>`:''}
       <button class="cancel" onclick="${rmode?'backToBuilder()':'closeModal()'}">Cancel</button>
       <button class="save" onclick="confirmAdd()">${rmode?(editIngIdx!=null?'Update ingredient':'Add to recipe'):(editing?'Save':'Add')}</button></div>`;
   updMacros();
@@ -747,7 +759,7 @@ function toggleSave(){const f=pendingFood,i=saved.findIndex(s=>fkey(s)===fkey(f)
   }
   else{saved.unshift({name:f.name,brand:f.brand||'',cal:f.cal,p:f.p,c:f.c,f:f.f,servingG:f.servingG||null,
     sl:f.sl||'',ps:!!f.ps,liq:f.liq});btn.classList.add('on');toast('Starred');}
-  saveAll();}
+  saveAll();renderFoodsPage();}
 function closeModal(){hideSheet('modalScrim','modal');pendingFood=null;editingId=null;}
 function openEditEntry(id){
   const e=(logs[curDate]||[]).find(x=>x.id===id);if(!e)return;
@@ -787,8 +799,10 @@ function saveQuick(){
 }
 
 /* ===== Custom food ===== */
-function openCustomForm(){
-  const pre=(document.getElementById('addSearch').value||'').trim();
+function openCustomForm(pre){
+  // Prefilled with whatever you were searching for — but only when you came from the Add sheet.
+  if(pre==null)pre=document.getElementById('addSheet').classList.contains('show')
+    ?(document.getElementById('addSearch').value||'').trim():'';
   document.getElementById('modal').innerHTML=`
     <div class="grab"></div>
     <h3>Custom food</h3>
@@ -871,7 +885,7 @@ function saveCustomFood(){
   // Goes in your food library (searchable), not the starred list — star it from the portion screen if you want it pinned.
   const i=mine.findIndex(m=>fkey(m)===fkey(food));
   if(i>=0)mine[i]=food; else mine.unshift(food);
-  saveAll();toast('Custom food saved');
+  saveAll();renderFoodsPage();toast('Custom food saved');
   openPortion({...food});
 }
 
@@ -973,6 +987,115 @@ function recipeMgmtCard(r){const per=recipePer(r),n=(r.items||[]).length,sg=serv
 function renderRecipesPage(){const box=document.getElementById('recipesList');
   box.innerHTML=recipes.length?recipes.map(recipeMgmtCard).join('')
     :'<div class="empty">No recipes yet.<br>Tap ＋ New recipe to build one.</div>';}
+
+/* ===== My foods =====
+   `mine` is everything you entered or scanned yourself. This page lists it so you
+   can correct a food once and have every future log use the fix, or throw it away.
+   Days you've already logged keep their own copy of the numbers, untouched. */
+function isMine(f){return mine.some(m=>fkey(m)===fkey(f));}
+function foodServCal(f){return f.ps?f.cal:calcMacros(f,f.servingG||100).cal;}
+function foodServLabel(f){
+  if(f.sl)return f.sl;                                   // "2 tbsp", "1 piece", whatever the label said
+  return f.ps?'serving':(f.servingG?f.servingG+' g':'serving');}
+function foodMgmtCard(f,i){
+  const star=saved.some(x=>fkey(x)===fkey(f))?'<span class="fstar">★</span>':'';
+  return `<div class="fcard"><div class="fi" onclick="openMyFood(${i})">
+    <div class="fn">${star}${esc(f.name)}</div>
+    <div class="fs">${f.brand?esc(f.brand)+' · ':''}${foodServCal(f)} kcal / ${esc(foodServLabel(f))}</div></div>
+    <button class="fedit" onclick="openEditFood(${i})" title="Edit">✎</button>
+    <button class="fdel" onclick="deleteMyFood(${i})" title="Delete">✕</button></div>`;}
+function renderFoodsPage(){const box=document.getElementById('foodsList');if(!box)return;
+  box.innerHTML=mine.length?mine.map(foodMgmtCard).join('')
+    :'<div class="empty">Nothing here yet.<br>Tap ＋ New to enter a food, or scan<br>a barcode from the Add screen.</div>';}
+function newCustomFood(){addTarget='log';addMeal=defaultMeal();openCustomForm('');}
+function openMyFood(i){const f=mine[i];if(!f)return;
+  addTarget='log';addMeal=defaultMeal();openPortion({...f});}
+// From the portion screen: edit the library food you're looking at.
+function editThisFood(){if(!pendingFood)return;
+  const i=mine.findIndex(m=>fkey(m)===fkey(pendingFood));
+  if(i<0){toast('Only your own foods can be edited');return;}
+  openEditFood(i);}
+function openEditFood(i){
+  const f=mine[i];if(!f)return;
+  editFoodIdx=i;
+  const per=f.ps?{cal:f.cal,p:f.p,c:f.c,f:f.f}:calcMacros(f,f.servingG||100);
+  document.getElementById('modal').innerHTML=`
+    <div class="grab"></div>
+    <h3>Edit food</h3>
+    <div class="msub">Nutrition is <b>per serving</b>. Fixes apply the next time you log it — days you've already logged keep what they were.</div>
+    <div class="row"><label>Name</label><input id="efName" type="text" value="${esc(f.name||'')}" placeholder="Food name" style="text-align:left"></div>
+    <div class="row"><label>Brand</label><input id="efBrand" type="text" value="${esc(f.brand||'')}" placeholder="optional" style="text-align:left"></div>
+    <div class="row"><label>Serving</label><input id="efServText" type="text" value="${esc(f.sl||'')}" placeholder="e.g. 1 cup — optional" style="text-align:left"></div>
+    <div class="row"><label>Serving g</label><input id="efServ" type="number" inputmode="decimal" value="${f.ps?'':(f.servingG||100)}" placeholder="grams — blank to log by the serving"></div>
+    ${f.ps?`<div class="msub" style="margin:-4px 0 10px">No gram weight, so this one is logged by the serving above. Add grams if you know them.</div>`:''}
+    <div class="row"><label>Calories</label><input id="efCal" type="number" inputmode="decimal" value="${per.cal||''}" placeholder="per serving"></div>
+    <div class="row"><label>Protein g</label><input id="efP" type="number" inputmode="decimal" value="${per.p||''}" placeholder="per serving"></div>
+    <div class="row"><label>Carbs g</label><input id="efC" type="number" inputmode="decimal" value="${per.c||''}" placeholder="per serving"></div>
+    <div class="row"><label>Fat g</label><input id="efF" type="number" inputmode="decimal" value="${per.f||''}" placeholder="per serving"></div>
+    <label class="row" style="cursor:pointer"><input id="efLiq" type="checkbox" ${isSpoonable(f)?'checked':''} style="flex:0 0 20px;width:20px;height:20px;accent-color:var(--accent)">
+      <span style="font-size:14px;color:var(--muted);width:auto">Liquid or spoonable — also measure in tbsp / tsp</span></label>
+    <div class="m-actions"><button class="cancel" onclick="deleteMyFood(${i})">Delete</button>
+      <button class="save" onclick="saveEditFood()">Save</button></div>
+    <div style="text-align:center;margin-top:12px"><button class="goal-edit" onclick="closeModal()">Cancel</button></div>`;
+  showSheet('modalScrim','modal');
+}
+function saveEditFood(){
+  const i=editFoodIdx, old=(i==null?null:mine[i]);
+  if(!old){closeModal();return;}
+  const name=document.getElementById('efName').value.trim();
+  const brand=document.getElementById('efBrand').value.trim();
+  const sl=document.getElementById('efServText').value.trim();
+  const servRaw=parseFloat(document.getElementById('efServ').value);
+  const cal=parseFloat(document.getElementById('efCal').value)||0;
+  const p=parseFloat(document.getElementById('efP').value)||0;
+  const c=parseFloat(document.getElementById('efC').value)||0;
+  const f=parseFloat(document.getElementById('efF').value)||0;
+  if(!name){toast('Enter a name');return;}
+  if(cal<=0){toast('Enter calories');return;}
+  const liq=!!document.getElementById('efLiq').checked, oldKey=fkey(old);
+  let food;
+  if(servRaw>0){
+    // Gram weight known — store per 100 g, keep the household label as an annotation.
+    const r=100/servRaw;
+    food={name,brand,cal:Math.round(cal*r),p:+(p*r).toFixed(1),c:+(c*r).toFixed(1),f:+(f*r).toFixed(1),
+      servingG:+servRaw.toFixed(1),sl,liq};
+  }else{
+    // No gram weight — per-serving food, logged by the serving rather than by grams.
+    food={name,brand,cal:Math.round(cal),p:+p.toFixed(1),c:+c.toFixed(1),f:+f.toFixed(1),
+      servingG:100,sl:sl||'serving',ps:true,liq};
+  }
+  mine[i]=food;
+  // A rename can land on a food that's already in the library — keep just the one you edited.
+  for(let j=mine.length-1;j>=0;j--)if(j!==i&&fkey(mine[j])===fkey(food))mine.splice(j,1);
+  syncFoodEdit(oldKey,food);
+  saveAll();renderFoodsPage();renderQuick();
+  editFoodIdx=null;toast('Food updated');
+  openPortion({...food});
+}
+// Keep the starred list, the barcode cache and the last-portion memory pointing at the edited food.
+function syncFoodEdit(oldKey,food){
+  const si=saved.findIndex(x=>fkey(x)===oldKey);
+  if(si>=0)saved[si]={name:food.name,brand:food.brand,cal:food.cal,p:food.p,c:food.c,f:food.f,
+    servingG:food.servingG,sl:food.sl,ps:!!food.ps,liq:food.liq};
+  let touched=false;
+  Object.keys(barcache).forEach(code=>{const b=barcache[code];
+    if(b&&fkey(b)===oldKey){barcache[code]={...food,code};touched=true;}});
+  if(touched)LS.set('ct_barcache',barcache);
+  const nk=fkey(food);
+  if(nk!==oldKey&&lastPortion[oldKey]){lastPortion[nk]=lastPortion[oldKey];delete lastPortion[oldKey];LS.set('ct_lastportion',lastPortion);}
+}
+function deleteMyFood(i){
+  const f=mine[i];if(!f)return;
+  if(!confirm('Delete “'+f.name+'” from your foods?\n\nDays you\'ve already logged keep their entries.'))return;
+  const k=fkey(f);
+  mine.splice(i,1);
+  const si=saved.findIndex(x=>fkey(x)===k);if(si>=0)saved.splice(si,1);
+  let touched=false;
+  Object.keys(barcache).forEach(code=>{if(barcache[code]&&fkey(barcache[code])===k){delete barcache[code];touched=true;}});
+  if(touched)LS.set('ct_barcache',barcache);
+  if(lastPortion[k]){delete lastPortion[k];LS.set('ct_lastportion',lastPortion);}
+  saveAll();editFoodIdx=null;closeModal();renderFoodsPage();renderQuick();toast('Deleted');
+}
 
 /* ===== Insights ===== */
 const LB=2.2046226;
@@ -1133,7 +1256,7 @@ function saveGoals(){
 let curPage=0;
 function pagerEl(){return document.getElementById('pager');}
 function updateDots(){const ds=document.querySelectorAll('#dots .dot');ds.forEach((d,i)=>d.classList.toggle('on',i===curPage));}
-function onPageEnter(i){if(i===1)renderInsights();else if(i===2)renderRecipesPage();}
+function onPageEnter(i){if(i===1)renderInsights();else if(i===2)renderRecipesPage();else if(i===3)renderFoodsPage();}
 function goToPage(i){const p=pagerEl();curPage=i;updateDots();onPageEnter(i);
   const x=i*p.clientWidth;if(p.scrollTo)p.scrollTo({left:x,behavior:'smooth'});else p.scrollLeft=x;}
 function onPagerScroll(){const p=pagerEl(),i=Math.round(p.scrollLeft/(p.clientWidth||1));
@@ -1409,7 +1532,7 @@ function saveLabelFood(){
   const proj={name:food.name,brand:food.brand,cal:food.cal,p:food.p,c:food.c,f:food.f,servingG:food.servingG,sl:food.sl,ps:food.ps,liq:food.liq};
   const mi=mine.findIndex(m=>fkey(m)===fkey(food));
   if(mi>=0)mine[mi]=proj; else mine.unshift(proj);
-  saveAll();
+  saveAll();renderFoodsPage();
   toast(pendingLabelCode?'Saved — future scans are instant':'Saved');
   pendingLabelCode='';
   openPortion({...food});
@@ -1467,7 +1590,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v5.8 · 2026-08-21';
+const APP_VERSION='v5.9 · 2026-08-30';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
@@ -1482,7 +1605,7 @@ renderVer();
 })();
 normalizeGoals();
 refresh();
-renderInsights();renderRecipesPage();   // pre-render swipe pages so they're ready
+renderInsights();renderRecipesPage();renderFoodsPage();   // pre-render swipe pages so they're ready
 pagerEl().addEventListener('scroll',onPagerScroll,{passive:true});
 window.addEventListener('resize',()=>{const p=pagerEl();p.scrollLeft=curPage*p.clientWidth;});
 enableDrag('addSheet',closeAdd);
