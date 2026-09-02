@@ -1282,7 +1282,9 @@ function enableDrag(sheetId,closeFn){
   const sheet=document.getElementById(sheetId);
   let startY=0,startX=0,dy=0,drag=false,fromHandle=false,t0=0,moved=false;
   const isHandle=t=>!!(t.closest&&t.closest('.grab,.add-title,h3,.msub'));
-  const scrollerOf=t=>t.closest&&t.closest('.add-results');
+  // The add sheet scrolls inside its results list; a modal scrolls in itself. Both count,
+  // or a plain scroll gesture inside a tall modal reads as a pull-to-dismiss and closes it.
+  const scrollerOf=t=>t.closest&&t.closest('.add-results,.modal');
   sheet.addEventListener('touchstart',e=>{
     const t=e.target;moved=false;drag=false;fromHandle=isHandle(t);
     if(!fromHandle){
@@ -1590,7 +1592,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v5.9 · 2026-08-30';
+const APP_VERSION='v5.10 · 2026-09-02';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
