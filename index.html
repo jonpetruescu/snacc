@@ -862,9 +862,11 @@ function saveCustomFood(){
   const serv=u==='g'?amt:u==='oz'?amt*OZ:(parseFloat(cfEl('cfGram').value)||0);
   let food;
   if(serv>0){
-    const r=100/serv;
-    food={name,brand:'',cal:Math.round(cal*r),p:+(p*r).toFixed(1),c:+(c*r).toFixed(1),f:+(f*r).toFixed(1),
-      servingG:+serv.toFixed(1),sl,liq};
+    // Derive per-100 g from the serving weight we actually store, and keep decimals on the
+    // calories: rounding either one is what turned an entered 300 kcal into 301 on read-back.
+    const sg=+serv.toFixed(1), r=100/sg;
+    food={name,brand:'',cal:+(cal*r).toFixed(2),p:+(p*r).toFixed(2),c:+(c*r).toFixed(2),f:+(f*r).toFixed(2),
+      servingG:sg,sl,liq};
   }else{
     // No weight → per-serving food, logged by the serving rather than by grams.
     food={name,brand:'',cal:Math.round(cal),p:+p.toFixed(1),c:+c.toFixed(1),f:+f.toFixed(1),
@@ -1044,9 +1046,9 @@ function saveEditFood(){
   let food;
   if(servRaw>0){
     // Gram weight known — store per 100 g, keep the household label as an annotation.
-    const r=100/servRaw;
-    food={name,brand,cal:Math.round(cal*r),p:+(p*r).toFixed(1),c:+(c*r).toFixed(1),f:+(f*r).toFixed(1),
-      servingG:+servRaw.toFixed(1),sl,liq};
+    const sg=+servRaw.toFixed(1), r=100/sg;
+    food={name,brand,cal:+(cal*r).toFixed(2),p:+(p*r).toFixed(2),c:+(c*r).toFixed(2),f:+(f*r).toFixed(2),
+      servingG:sg,sl,liq};
   }else{
     // No gram weight — per-serving food, logged by the serving rather than by grams.
     food={name,brand,cal:Math.round(cal),p:+p.toFixed(1),c:+c.toFixed(1),f:+f.toFixed(1),
@@ -1580,7 +1582,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
 
 /* ===== Init ===== */
-const APP_VERSION='v5.12 · 2026-09-04';
+const APP_VERSION='v5.13 · 2026-09-04';
 renderVer();
 // Reliable iOS auto-update: check version.json on launch; if newer, reload fresh.
 (async function checkForUpdate(){
